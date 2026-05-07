@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    "openapi-trait-macros",
+    "openapi-trait",
+    "openapi-trait-axum",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = []
+license = "MIT"
+repository = "https://github.com/ndrsg/openapi-trait"
+description = "Generate typed Rust traits from OpenAPI specifications"
+
+# Clippy: https://doc.rust-lang.org/stable/clippy/index.html
+[workspace.lints.clippy]
+# enable all lints that are on by default
+# (correctness, suspicious, style, complexity, perf)
+all = "deny"
+# enable lints for the Cargo manifest file, a.k.a. Cargo.toml.
+cargo = { level = "deny", priority = 0 }
+cargo_common_metadata = { level = "allow", priority = 1 }
+# enable lints for missing documentation on private items
+missing_docs_in_private_items = "deny"
+multiple_crate_versions = { level = "allow", priority = 1 }
+# enable lints which are rather strict
+# or have occasional false positives
+nursery = "deny"
+# enable new lints that are still under development
+pedantic = "deny"
+
+[workspace.lints.rust]
+missing_debug_implementations = "deny"
+missing_docs = "deny"
+
+# Rustdoc: https://doc.rust-lang.org/rustdoc/index.html
+[workspace.lints.rustdoc]
+all = "deny"
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "allow"

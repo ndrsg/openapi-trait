@@ -1,0 +1,14 @@
+[package]
+name = "openapi-trait-axum"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Axum integration for openapi-trait: generate axum routers from OpenAPI specifications"
+
+[dependencies]
+openapi-trait = { path = "../openapi-trait", version = "0.1.0" }
+
+[lints]
+workspace = true
