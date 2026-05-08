@@ -1,0 +1,1 @@
+openapi-trait/README.md
