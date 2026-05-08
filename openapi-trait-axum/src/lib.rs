@@ -24,12 +24,15 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 ///   header params and the request body)
 /// - Per-operation `{OperationId}Response` enums implementing
 ///   [`axum::response::IntoResponse`](https://docs.rs/axum/latest/axum/response/trait.IntoResponse.html)
-/// - A `{Title}Api` trait with one `async fn` per operation (keyed by
+/// - A `{ModName}Api<S = ()>` trait with one `async fn` per operation (keyed by
 ///   `operationId`). Trait methods have a default implementation that returns
 ///   `500 Internal Server Error`, so you only need to override the operations
 ///   your server handles.
 /// - A `router` method on the trait that wires all operations to an
 ///   [`axum::Router`](https://docs.rs/axum/latest/axum/struct.Router.html)
+///
+/// The generated trait name is derived from the annotated module name, so
+/// `mod petstore {}` produces `petstore::PetstoreApi`.
 ///
 /// The crate recompiles automatically whenever the spec file changes.
 ///

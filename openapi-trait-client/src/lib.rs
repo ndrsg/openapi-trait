@@ -24,11 +24,14 @@ use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
 ///   header params and the request body)
 /// - Per-operation `{OperationId}Response` enums whose variants map to HTTP
 ///   status codes
-/// - A `{Title}Client` trait with one method per operation (keyed by
-///   `operationId`
+/// - A `{ModName}Client` trait with one method per operation (keyed by
+///   `operationId`)
 /// - When the `reqwest-client` cargo feature is enabled through
 ///   `openapi-trait`, a blanket reqwest-backed implementation for any user
 ///   type deriving [`ReqwestClient`]
+///
+/// The generated trait name is derived from the annotated module name, so
+/// `mod petstore {}` produces `petstore::PetstoreClient`.
 #[proc_macro_attribute]
 pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
     let path_lit = parse_macro_input!(attr as LitStr);

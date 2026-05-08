@@ -7,6 +7,8 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Axum-specific procedural macro for openapi-trait (not intended for direct use)"
+readme = "README.md"
+documentation = "https://docs.rs/openapi-trait-axum"
 keywords.workspace = true
 categories.workspace = true
 
