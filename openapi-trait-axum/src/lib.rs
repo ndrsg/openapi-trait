@@ -38,38 +38,6 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 /// First positional argument: path to the `OpenAPI` YAML or JSON file,
 /// relative to the crate root (`CARGO_MANIFEST_DIR`).
 ///
-/// # Examples
-///
-/// ```rust,ignore
-/// #[openapi_trait::axum("openapi/petstore.yaml")]
-/// pub mod petstore {}
-///
-/// #[derive(Clone)]
-/// struct MyServer;
-///
-/// impl petstore::PetstoreApi for MyServer {
-///     type Error = std::convert::Infallible;
-///
-///     async fn get_pet_by_id(
-///         &self,
-///         req: petstore::GetPetByIdRequest,
-///         _state: axum::extract::State<()>,
-///         _headers: axum::http::HeaderMap,
-///     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
-///         Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
-///             id: Some(req.pet_id),
-///             name: "doggie".into(),
-///             photo_urls: vec![],
-///             category: None,
-///             tags: None,
-///             status: None,
-///         }))
-///     }
-/// }
-///
-/// let app = MyServer.router().with_state(());
-/// ```
-///
 /// # Errors
 ///
 /// The macro emits a compile error if:

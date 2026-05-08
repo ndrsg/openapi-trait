@@ -3,6 +3,45 @@
 //! This crate exposes the [`axum`] and [`client`] attribute macros, which read
 //! an `OpenAPI` specification file at compile time and generate inside the
 //! annotated `mod`.
+//! 
+//! # Examples
+//!
+//! ```rust
+//! #[openapi_trait::axum("assets/testdata/petstore.openapi.yaml")]
+//! pub mod petstore {}
+//!
+//! #[derive(Clone)]
+//! struct MyServer;
+//! 
+//! #[derive(Clone)]
+//! struct MyState {
+//!     // ...
+//! }
+//!
+//! impl petstore::PetstoreApi<MyState> for MyServer {
+//!     type Error = std::convert::Infallible;
+//!
+//!     async fn get_pet_by_id(
+//!         &self,
+//!         req: petstore::GetPetByIdRequest,
+//!         _state: axum::extract::State<MyState>,
+//!         _headers: axum::http::HeaderMap,
+//!     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
+//!         Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
+//!             id: Some(req.pet_id),
+//!             name: "doggie".into(),
+//!             photo_urls: vec![],
+//!             category: None,
+//!             tags: None,
+//!             status: None,
+//!         }))
+//!     }
+//! }
+//! 
+//!
+//! use petstore::PetstoreApi as _;
+//! let app: axum::Router = MyServer.router().with_state(MyState { /* ... */ });
+//! ```
 
 #[doc(inline)]
 pub use openapi_trait_axum::openapi_trait as axum;

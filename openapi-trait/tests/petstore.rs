@@ -1,6 +1,6 @@
 //! Integration tests for the `openapi_trait_axum` macro using the Petstore spec.
 
-#[openapi_trait::axum("../assets/testdata/petstore.openapi.yaml")]
+#[openapi_trait::axum("assets/testdata/petstore.openapi.yaml")]
 pub mod petstore {}
 
 use petstore::PetstoreApi as _;

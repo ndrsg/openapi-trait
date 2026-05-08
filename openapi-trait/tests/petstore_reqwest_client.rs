@@ -1,10 +1,10 @@
 //! Integration tests for the feature-gated reqwest client generator.
 #![cfg(feature = "reqwest-client")]
 
-#[openapi_trait::client("../assets/testdata/petstore.openapi.yaml")]
+#[openapi_trait::client("assets/testdata/petstore.openapi.yaml")]
 pub mod petstore {}
 
-#[openapi_trait::axum("../assets/testdata/petstore.openapi.yaml")]
+#[openapi_trait::axum("assets/testdata/petstore.openapi.yaml")]
 mod petstore_server {}
 
 use petstore::PetstoreClient as _;

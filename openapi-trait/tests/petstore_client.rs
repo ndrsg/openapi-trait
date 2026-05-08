@@ -1,6 +1,6 @@
 //! Integration tests for the `openapi_trait_client` macro using the Petstore spec.
 
-#[openapi_trait::client("../assets/testdata/petstore.openapi.yaml")]
+#[openapi_trait::client("assets/testdata/petstore.openapi.yaml")]
 pub mod petstore {}
 
 use petstore::PetstoreClient as _;

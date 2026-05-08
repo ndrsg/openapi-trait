@@ -18,7 +18,7 @@ impl petstore::PetstoreApi for MyServer {
     async fn get_pet_by_id(
         &self,
         req: petstore::GetPetByIdRequest,
-        _state: axum::extract::State<()>,
+        _state: axum::extract::State<MyState>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
         Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
