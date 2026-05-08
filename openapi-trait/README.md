@@ -1,5 +1,10 @@
 # openapi-trait
 
+[![Build status](https://github.com/ndrsg/openapi-trait/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/ndrsg/openapi-trait/actions/workflows/CI.yml)
+[![Crates.io](https://img.shields.io/crates/v/openapi-trait)](https://crates.io/crates/openapi-trait)
+[![Documentation](https://docs.rs/openapi-trait/badge.svg)](https://docs.rs/openapi-trait)
+
+
 A Rust proc-macro attribute that reads an OpenAPI specification file at
 **compile time** and generates typed Rust traits from it, so you can implement
 your API server or define a transport-agnostic client contract with full type
