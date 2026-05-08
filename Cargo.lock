@@ -539,6 +539,7 @@ dependencies = [
  "axum",
  "openapi-trait-axum",
  "openapi-trait-client",
+ "percent-encoding",
  "reqwest",
  "serde",
  "serde_json",

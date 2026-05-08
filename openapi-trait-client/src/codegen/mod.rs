@@ -1,4 +1,5 @@
 mod client_trait;
+mod reqwest_impl;
 
 use openapiv3::OpenAPI;
 use proc_macro2::TokenStream;
@@ -9,19 +10,23 @@ use openapi_trait_shared::codegen::{
     schemas::generate_schemas,
 };
 
-use self::client_trait::generate_trait;
+use self::{client_trait::generate_trait, reqwest_impl::generate_reqwest_impl};
 
 /// Generate schemas + operation types + transport-agnostic client trait.
-pub fn generate_client(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
+pub fn generate_client(mod_ident: &syn::Ident, openapi: &OpenAPI, include_reqwest: bool) -> TokenStream {
     let schemas = generate_schemas(openapi);
     let ops = collect_operations(openapi);
     let op_types = generate_operation_types(&ops);
     let client_trait = generate_trait(mod_ident, &ops);
+    let reqwest_impl = include_reqwest
+        .then(|| generate_reqwest_impl(mod_ident, &ops))
+        .unwrap_or_default();
 
     quote! {
         use super::*;
         #schemas
         #op_types
         #client_trait
+        #reqwest_impl
     }
 }

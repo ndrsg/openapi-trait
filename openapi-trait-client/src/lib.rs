@@ -1,16 +1,17 @@
 //! Client backend proc-macro for `openapi-trait`.
-//! 
+//!
 //! This crate is not intended for direct use. Use the
 //! [`openapi-trait`](https://docs.rs/openapi-trait) crate instead, which
 //! re-exports the [`openapi_trait`] attribute macro from here as
 //! `openapi_trait::client`.
 
 mod codegen;
+mod reqwest_derive;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
-use syn::{parse_macro_input, ItemMod, LitStr};
+use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
 
 /// Generates transport-agnostic Rust client traits from an `OpenAPI` specification file.
 ///
@@ -24,56 +25,32 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 /// - Per-operation `{OperationId}Response` enums whose variants map to HTTP
 ///   status codes
 /// - A `{Title}Client` trait with one method per operation (keyed by
-///   `operationId`)
-///
-/// The crate recompiles automatically whenever the spec file changes.
-///
-/// # Arguments
-///
-/// First positional argument: path to the `OpenAPI` YAML or JSON file,
-/// relative to the crate root (`CARGO_MANIFEST_DIR`).
-///
-/// # Examples
-///
-/// ```rust,ignore
-/// #[openapi_trait::client("openapi/petstore.yaml")]
-/// pub mod petstore {}
-///
-/// struct MyClient;
-///
-/// impl petstore::PetstoreClient for MyClient {
-///     type Error = std::convert::Infallible;
-///
-///     async fn get_pet_by_id(
-///         &self,
-///         req: petstore::GetPetByIdRequest,
-///     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
-///         Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
-///             id: Some(req.pet_id),
-///             name: "doggie".into(),
-///             photo_urls: vec![],
-///             category: None,
-///             tags: None,
-///             status: None,
-///         }))
-///     }
-/// }
-/// ```
-///
-/// # Errors
-///
-/// The macro emits a compile error if:
-///
-/// - The file cannot be found or read.
-/// - The `OpenAPI` document is malformed or cannot be parsed.
-/// - An operation is missing an `operationId`.
+///   `operationId`
+/// - When the `reqwest-client` cargo feature is enabled through
+///   `openapi-trait`, a blanket reqwest-backed implementation for any user
+///   type deriving [`ReqwestClient`]
 #[proc_macro_attribute]
 pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
     let path_lit = parse_macro_input!(attr as LitStr);
-    run_macro(path_lit, item)
+    run_macro(path_lit, item, cfg!(feature = "reqwest-client"))
 }
 
-fn run_macro(path_lit: LitStr, item: TokenStream) -> TokenStream {
+/// Derive the reqwest client carrier trait for a user-owned struct.
+///
+/// By default, the derive expects named fields called `client` and `base_url`.
+/// You can override those conventions with field attributes:
+/// `#[openapi_trait(client)]` and `#[openapi_trait(base_url)]`.
+#[proc_macro_derive(ReqwestClient, attributes(openapi_trait))]
+pub fn derive_reqwest_client(item: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(item as DeriveInput);
+
+    match reqwest_derive::expand_reqwest_client(input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+fn run_macro(path_lit: LitStr, item: TokenStream, include_reqwest: bool) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
     let mod_ident = &module.ident;
     let mod_vis = &module.vis;
@@ -113,7 +90,7 @@ fn run_macro(path_lit: LitStr, item: TokenStream) -> TokenStream {
         }
     };
 
-    let body = codegen::generate_client(mod_ident, &openapi);
+    let body = codegen::generate_client(mod_ident, &openapi, include_reqwest);
 
     let expanded = quote! {
         const _: &str = ::core::include_str!(#spec_path_str);
