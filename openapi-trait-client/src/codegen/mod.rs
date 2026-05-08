@@ -13,7 +13,11 @@ use openapi_trait_shared::codegen::{
 use self::{client_trait::generate_trait, reqwest_impl::generate_reqwest_impl};
 
 /// Generate schemas + operation types + transport-agnostic client trait.
-pub fn generate_client(mod_ident: &syn::Ident, openapi: &OpenAPI, include_reqwest: bool) -> TokenStream {
+pub fn generate_client(
+    mod_ident: &syn::Ident,
+    openapi: &OpenAPI,
+    include_reqwest: bool,
+) -> TokenStream {
     let schemas = generate_schemas(openapi);
     let ops = collect_operations(openapi);
     let op_types = generate_operation_types(&ops);

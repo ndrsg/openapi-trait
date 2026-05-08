@@ -84,7 +84,9 @@ async fn spawn_server() -> std::string::String {
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        axum::serve(listener, RichMockPetstore.router().with_state(())).await.unwrap();
+        axum::serve(listener, RichMockPetstore.router().with_state(()))
+            .await
+            .unwrap();
     });
 
     format!("http://{addr}")

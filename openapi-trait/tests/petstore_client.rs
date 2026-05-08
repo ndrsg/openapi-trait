@@ -19,7 +19,11 @@ impl petstore::PetstoreClient for MockPetstoreClient {
     type Error = ::std::convert::Infallible;
 
     unreachable_operation!(add_pet, petstore::AddPetRequest, petstore::AddPetResponse);
-    unreachable_operation!(update_pet, petstore::UpdatePetRequest, petstore::UpdatePetResponse);
+    unreachable_operation!(
+        update_pet,
+        petstore::UpdatePetRequest,
+        petstore::UpdatePetResponse
+    );
     unreachable_operation!(
         find_pets_by_status,
         petstore::FindPetsByStatusRequest,
@@ -35,14 +39,26 @@ impl petstore::PetstoreClient for MockPetstoreClient {
         petstore::UpdatePetWithFormRequest,
         petstore::UpdatePetWithFormResponse
     );
-    unreachable_operation!(delete_pet, petstore::DeletePetRequest, petstore::DeletePetResponse);
-    unreachable_operation!(upload_file, petstore::UploadFileRequest, petstore::UploadFileResponse);
+    unreachable_operation!(
+        delete_pet,
+        petstore::DeletePetRequest,
+        petstore::DeletePetResponse
+    );
+    unreachable_operation!(
+        upload_file,
+        petstore::UploadFileRequest,
+        petstore::UploadFileResponse
+    );
     unreachable_operation!(
         get_inventory,
         petstore::GetInventoryRequest,
         petstore::GetInventoryResponse
     );
-    unreachable_operation!(place_order, petstore::PlaceOrderRequest, petstore::PlaceOrderResponse);
+    unreachable_operation!(
+        place_order,
+        petstore::PlaceOrderRequest,
+        petstore::PlaceOrderResponse
+    );
     unreachable_operation!(
         get_order_by_id,
         petstore::GetOrderByIdRequest,
@@ -53,21 +69,41 @@ impl petstore::PetstoreClient for MockPetstoreClient {
         petstore::DeleteOrderRequest,
         petstore::DeleteOrderResponse
     );
-    unreachable_operation!(create_user, petstore::CreateUserRequest, petstore::CreateUserResponse);
+    unreachable_operation!(
+        create_user,
+        petstore::CreateUserRequest,
+        petstore::CreateUserResponse
+    );
     unreachable_operation!(
         create_users_with_list_input,
         petstore::CreateUsersWithListInputRequest,
         petstore::CreateUsersWithListInputResponse
     );
-    unreachable_operation!(login_user, petstore::LoginUserRequest, petstore::LoginUserResponse);
-    unreachable_operation!(logout_user, petstore::LogoutUserRequest, petstore::LogoutUserResponse);
+    unreachable_operation!(
+        login_user,
+        petstore::LoginUserRequest,
+        petstore::LoginUserResponse
+    );
+    unreachable_operation!(
+        logout_user,
+        petstore::LogoutUserRequest,
+        petstore::LogoutUserResponse
+    );
     unreachable_operation!(
         get_user_by_name,
         petstore::GetUserByNameRequest,
         petstore::GetUserByNameResponse
     );
-    unreachable_operation!(update_user, petstore::UpdateUserRequest, petstore::UpdateUserResponse);
-    unreachable_operation!(delete_user, petstore::DeleteUserRequest, petstore::DeleteUserResponse);
+    unreachable_operation!(
+        update_user,
+        petstore::UpdateUserRequest,
+        petstore::UpdateUserResponse
+    );
+    unreachable_operation!(
+        delete_user,
+        petstore::DeleteUserRequest,
+        petstore::DeleteUserResponse
+    );
 
     async fn get_pet_by_id(
         &self,
