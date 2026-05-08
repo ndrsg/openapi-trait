@@ -85,6 +85,7 @@ pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> T
     }
 }
 
+/// Generate one reqwest-backed trait method for a single `OpenAPI` operation.
 fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> TokenStream {
     let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
@@ -118,6 +119,49 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
     let query_builder = generate_query_builder(op);
     let header_builder = generate_header_builder(op, error_name, operation_name);
     let body_builder = generate_body_builder(op);
+    let (response_arms, fallback) =
+        generate_response_match(op, error_name, &resp_ident, operation_name);
+
+    quote! {
+        fn #method_ident(
+            &self,
+            req: #req_ident,
+        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
+            let client = ::openapi_trait::ReqwestClientCore::reqwest_client(self).clone();
+            let base_url = ::openapi_trait::ReqwestClientCore::base_url(self).to_owned();
+
+            async move {
+                let #req_ident { #(#request_fields),* } = req;
+                let mut path = ::std::string::String::from(#path);
+                #(#path_replacements)*
+
+                let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+                let mut request = client.#http_method(url);
+
+                #query_struct
+                #query_builder
+                #header_builder
+                #body_builder
+
+                let response = request.send().await.map_err(#error_name::Transport)?;
+                let status = response.status();
+
+                match status.as_u16() {
+                    #(#response_arms)*
+                    #fallback
+                }
+            }
+        }
+    }
+}
+
+/// Generate the match arms used to translate reqwest responses into operation response enums.
+fn generate_response_match(
+    op: &OperationInfo,
+    error_name: &proc_macro2::Ident,
+    resp_ident: &proc_macro2::Ident,
+    operation_name: &str,
+) -> (Vec<TokenStream>, TokenStream) {
     let response_arms: Vec<TokenStream> = op
         .responses
         .iter()
@@ -168,39 +212,10 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
         }
     };
 
-    quote! {
-        fn #method_ident(
-            &self,
-            req: #req_ident,
-        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
-            let client = ::openapi_trait::ReqwestClientCore::reqwest_client(self).clone();
-            let base_url = ::openapi_trait::ReqwestClientCore::base_url(self).to_owned();
-
-            async move {
-                let #req_ident { #(#request_fields),* } = req;
-                let mut path = ::std::string::String::from(#path);
-                #(#path_replacements)*
-
-                let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-                let mut request = client.#http_method(url);
-
-                #query_struct
-                #query_builder
-                #header_builder
-                #body_builder
-
-                let response = request.send().await.map_err(#error_name::Transport)?;
-                let status = response.status();
-
-                match status.as_u16() {
-                    #(#response_arms)*
-                    #fallback
-                }
-            }
-        }
-    }
+    (response_arms, fallback)
 }
 
+/// Generate a serializable helper struct for query parameters.
 fn generate_query_struct(op: &OperationInfo) -> TokenStream {
     if op.query_params.is_empty() {
         return quote! {};
@@ -221,6 +236,7 @@ fn generate_query_struct(op: &OperationInfo) -> TokenStream {
     }
 }
 
+/// Generate one field for the reqwest query helper struct.
 fn generate_query_struct_field(param: &ParamInfo) -> TokenStream {
     let field_ident = format_ident!("{}", param.name.to_snake_case());
     let ty = &param.rust_type;
@@ -243,6 +259,7 @@ fn generate_query_struct_field(param: &ParamInfo) -> TokenStream {
     }
 }
 
+/// Generate the reqwest query population code for an operation.
 fn generate_query_builder(op: &OperationInfo) -> TokenStream {
     if op.query_params.is_empty() {
         return quote! {};
@@ -264,6 +281,7 @@ fn generate_query_builder(op: &OperationInfo) -> TokenStream {
     }
 }
 
+/// Generate the reqwest header population code for an operation.
 fn generate_header_builder(
     op: &OperationInfo,
     error_name: &proc_macro2::Ident,
@@ -302,6 +320,7 @@ fn generate_header_builder(
     quote! { #(#header_updates)* }
 }
 
+/// Generate the reqwest request body population code for an operation.
 fn generate_body_builder(op: &OperationInfo) -> TokenStream {
     match op.body {
         Some(ref body) if body.required => quote! {

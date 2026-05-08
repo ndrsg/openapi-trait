@@ -41,22 +41,18 @@ pub fn expand_reqwest_client(input: DeriveInput) -> syn::Result<TokenStream> {
             default_base_url = Some(field_ident.clone());
         }
 
-        if markers.client {
-            if explicit_client.replace(field_ident.clone()).is_some() {
-                return Err(Error::new_spanned(
-                    &field_ident,
-                    "duplicate #[openapi_trait(client)] field",
-                ));
-            }
+        if markers.client && explicit_client.replace(field_ident.clone()).is_some() {
+            return Err(Error::new_spanned(
+                &field_ident,
+                "duplicate #[openapi_trait(client)] field",
+            ));
         }
 
-        if markers.base_url {
-            if explicit_base_url.replace(field_ident.clone()).is_some() {
-                return Err(Error::new_spanned(
-                    &field_ident,
-                    "duplicate #[openapi_trait(base_url)] field",
-                ));
-            }
+        if markers.base_url && explicit_base_url.replace(field_ident.clone()).is_some() {
+            return Err(Error::new_spanned(
+                &field_ident,
+                "duplicate #[openapi_trait(base_url)] field",
+            ));
         }
     }
 
@@ -88,11 +84,15 @@ pub fn expand_reqwest_client(input: DeriveInput) -> syn::Result<TokenStream> {
 }
 
 #[derive(Default)]
+/// Track whether a field is explicitly marked for reqwest client extraction.
 struct FieldMarkers {
+    /// Whether the field stores the `reqwest::Client`.
     client: bool,
+    /// Whether the field stores the service base URL.
     base_url: bool,
 }
 
+/// Parse `#[openapi_trait(...)]` markers from one struct field.
 fn parse_markers(attrs: &[syn::Attribute]) -> syn::Result<FieldMarkers> {
     let mut markers = FieldMarkers::default();
 

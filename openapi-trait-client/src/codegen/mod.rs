@@ -1,4 +1,6 @@
+/// Generated trait definitions for client APIs.
 mod client_trait;
+/// Generated reqwest-backed client implementations.
 mod reqwest_impl;
 
 use openapiv3::OpenAPI;
@@ -22,9 +24,11 @@ pub fn generate_client(
     let ops = collect_operations(openapi);
     let op_types = generate_operation_types(&ops);
     let client_trait = generate_trait(mod_ident, &ops);
-    let reqwest_impl = include_reqwest
-        .then(|| generate_reqwest_impl(mod_ident, &ops))
-        .unwrap_or_default();
+    let reqwest_impl = if include_reqwest {
+        generate_reqwest_impl(mod_ident, &ops)
+    } else {
+        TokenStream::default()
+    };
 
     quote! {
         use super::*;

@@ -5,7 +5,9 @@
 //! re-exports the [`openapi_trait`] attribute macro from here as
 //! `openapi_trait::client`.
 
+/// Code generation helpers for the attribute macro.
 mod codegen;
+/// Derive expansion helpers for `ReqwestClient`.
 mod reqwest_derive;
 
 use proc_macro::TokenStream;
@@ -35,7 +37,7 @@ use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
 #[proc_macro_attribute]
 pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
     let path_lit = parse_macro_input!(attr as LitStr);
-    run_macro(path_lit, item, cfg!(feature = "reqwest-client"))
+    run_macro(&path_lit, item, cfg!(feature = "reqwest-client"))
 }
 
 /// Derive the reqwest client carrier trait for a user-owned struct.
@@ -53,21 +55,19 @@ pub fn derive_reqwest_client(item: TokenStream) -> TokenStream {
     }
 }
 
-fn run_macro(path_lit: LitStr, item: TokenStream, include_reqwest: bool) -> TokenStream {
+/// Expand `#[openapi_trait("...")]` into a generated client module.
+fn run_macro(path_lit: &LitStr, item: TokenStream, include_reqwest: bool) -> TokenStream {
     let module = parse_macro_input!(item as ItemMod);
     let mod_ident = &module.ident;
     let mod_vis = &module.vis;
 
-    let manifest_dir = match std::env::var("CARGO_MANIFEST_DIR") {
-        Ok(value) => value,
-        Err(_) => {
-            return syn::Error::new(
-                Span::call_site(),
-                "CARGO_MANIFEST_DIR is not set; cannot resolve spec path",
-            )
-            .to_compile_error()
-            .into();
-        }
+    let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
+        return syn::Error::new(
+            Span::call_site(),
+            "CARGO_MANIFEST_DIR is not set; cannot resolve spec path",
+        )
+        .to_compile_error()
+        .into();
     };
 
     let spec_path = std::path::PathBuf::from(&manifest_dir).join(path_lit.value());
@@ -76,7 +76,7 @@ fn run_macro(path_lit: LitStr, item: TokenStream, include_reqwest: bool) -> Toke
     let content = match std::fs::read_to_string(&spec_path) {
         Ok(value) => value,
         Err(error) => {
-            let msg = format!("cannot read OpenAPI spec `{}`: {}", spec_path_str, error);
+            let msg = format!("cannot read OpenAPI spec `{spec_path_str}`: {error}");
             return syn::Error::new(path_lit.span(), msg)
                 .to_compile_error()
                 .into();
@@ -86,7 +86,7 @@ fn run_macro(path_lit: LitStr, item: TokenStream, include_reqwest: bool) -> Toke
     let openapi: openapiv3::OpenAPI = match serde_yaml::from_str(&content) {
         Ok(value) => value,
         Err(error) => {
-            let msg = format!("cannot parse OpenAPI spec `{}`: {}", spec_path_str, error);
+            let msg = format!("cannot parse OpenAPI spec `{spec_path_str}`: {error}");
             return syn::Error::new(path_lit.span(), msg)
                 .to_compile_error()
                 .into();
