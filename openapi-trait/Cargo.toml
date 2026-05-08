@@ -17,8 +17,8 @@ default = ["reqwest-client"]
 reqwest-client = ["dep:reqwest", "dep:percent-encoding", "openapi-trait-client/reqwest-client"]
 
 [dependencies]
-openapi-trait-axum = { path = "../openapi-trait-axum", version = "0.0.1" }
-openapi-trait-client = { path = "../openapi-trait-client", version = "0.0.1" }
+openapi-trait-axum = { path = "../openapi-trait-axum", version = "0.0.2" }
+openapi-trait-client = { path = "../openapi-trait-client", version = "0.0.2" }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"], optional = true }
 percent-encoding = { version = "2.3.2", optional = true }
 
