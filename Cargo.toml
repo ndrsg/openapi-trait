@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "openapi-trait-axum",
+    "openapi-trait-client",
     "openapi-trait-shared",
     "openapi-trait",
 ]

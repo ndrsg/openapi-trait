@@ -1,0 +1,27 @@
+[package]
+name = "openapi-trait-client"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Transport-agnostic client procedural macro for openapi-trait (not intended for direct use)"
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+openapiv3 = "2"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+heck = "0.5"
+openapi-trait-shared = { path = "../openapi-trait-shared", version = "0.0.1" }
+
+[lints]
+workspace = true

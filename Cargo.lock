@@ -538,6 +538,7 @@ version = "0.0.1"
 dependencies = [
  "axum",
  "openapi-trait-axum",
+ "openapi-trait-client",
  "reqwest",
  "serde",
  "serde_json",
@@ -546,6 +547,20 @@ dependencies = [
 
 [[package]]
 name = "openapi-trait-axum"
+version = "0.0.1"
+dependencies = [
+ "heck",
+ "openapi-trait-shared",
+ "openapiv3",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "syn",
+]
+
+[[package]]
+name = "openapi-trait-client"
 version = "0.0.1"
 dependencies = [
  "heck",
