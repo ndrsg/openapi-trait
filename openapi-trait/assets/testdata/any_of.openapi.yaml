@@ -1,0 +1,25 @@
+# Hand-written fixture: the upstream openapi-generator test corpus does not
+# include a clean small-scale anyOf example, so we exercise the path with a
+# minimal SearchTerm schema that accepts either a string or an integer.
+openapi: 3.0.1
+info:
+  title: search
+  version: 0.0.1
+paths:
+  /search:
+    get:
+      operationId: search
+      responses:
+        '200':
+          description: a search term
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchTerm'
+components:
+  schemas:
+    SearchTerm:
+      anyOf:
+        - type: string
+        - type: integer
+          format: int32

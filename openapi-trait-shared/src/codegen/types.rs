@@ -1,13 +1,36 @@
 use openapiv3::{IntegerFormat, NumberFormat, ReferenceOr, Schema, SchemaKind, StringFormat, Type};
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 
 /// Map an `OpenAPI` `Schema` (or `$ref`) to a Rust type `TokenStream`.
 ///
 /// `required` controls whether the result is wrapped in `Option<T>`.
+///
+/// This is the context-free entry point: any inline `oneOf` / `allOf` / `anyOf`
+/// encountered along the way falls back to `serde_json::Value`. Use
+/// [`schema_to_rust_type_ctx`] when a parent name is available so that inline
+/// compositions can be synthesized into named top-level types.
 #[must_use]
 pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
-    let inner = ref_or_to_inner_type(ref_or);
+    let mut sink: Vec<TokenStream> = Vec::new();
+    schema_to_rust_type_ctx(ref_or, required, None, &mut sink)
+    // sink is discarded — by definition no parent name means no synthesis.
+}
+
+/// Context-aware variant of [`schema_to_rust_type`].
+///
+/// When `parent_name` is `Some` and an inline composition is encountered, a
+/// top-level type definition is appended to `inline_types` (`parent_name` is
+/// used verbatim as the type ident) and the returned token stream references
+/// that ident.
+#[must_use]
+pub fn schema_to_rust_type_ctx(
+    ref_or: &ReferenceOr<Schema>,
+    required: bool,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
+    let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, inline_types);
     if required {
         inner
     } else {
@@ -15,11 +38,16 @@ pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> Toke
     }
 }
 
-/// Convert a reference-or-schema to a Rust type token stream.
-fn ref_or_to_inner_type(ref_or: &ReferenceOr<Schema>) -> TokenStream {
+/// Resolve a `$ref` or inline schema to its Rust type, threading inline-type
+/// synthesis context through.
+fn ref_or_to_inner_type_ctx(
+    ref_or: &ReferenceOr<Schema>,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
     match ref_or {
         ReferenceOr::Reference { reference } => ref_to_ident(reference),
-        ReferenceOr::Item(schema) => schema_kind_to_type(&schema.schema_kind),
+        ReferenceOr::Item(schema) => schema_kind_to_type(schema, parent_name, inline_types),
     }
 }
 
@@ -27,27 +55,82 @@ fn ref_or_to_inner_type(ref_or: &ReferenceOr<Schema>) -> TokenStream {
 pub fn ref_to_ident(reference: &str) -> TokenStream {
     // "#/components/schemas/Foo" -> Foo
     let name = reference.rsplit('/').next().unwrap_or(reference);
-    let ident = quote::format_ident!("{}", name);
+    let ident = format_ident!("{}", name);
     quote! { #ident }
 }
 
-/// Convert a schema kind to a Rust type token stream.
-fn schema_kind_to_type(kind: &SchemaKind) -> TokenStream {
-    match kind {
-        SchemaKind::Type(t) => primitive_type_to_rust(t),
-        // For compositions, fall back to serde_json::Value
-        SchemaKind::OneOf { .. }
-        | SchemaKind::AllOf { .. }
-        | SchemaKind::AnyOf { .. }
-        | SchemaKind::Not { .. }
-        | SchemaKind::Any(_) => {
+/// Convert a schema to a Rust type, synthesizing a top-level composition type
+/// when `parent_name` is provided and the schema is a composition.
+fn schema_kind_to_type(
+    schema: &Schema,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
+    match &schema.schema_kind {
+        SchemaKind::Type(t) => primitive_type_to_rust(t, parent_name, inline_types),
+        SchemaKind::OneOf { one_of } => {
+            synthesize_inline_composition(parent_name, inline_types, |name, sink| {
+                super::compositions::generate_one_of(
+                    name,
+                    one_of,
+                    schema.schema_data.discriminator.as_ref(),
+                    schema.schema_data.description.as_ref(),
+                    sink,
+                )
+            })
+        }
+        SchemaKind::AnyOf { any_of } => {
+            synthesize_inline_composition(parent_name, inline_types, |name, sink| {
+                super::compositions::generate_any_of(
+                    name,
+                    any_of,
+                    schema.schema_data.description.as_ref(),
+                    sink,
+                )
+            })
+        }
+        SchemaKind::AllOf { all_of } => {
+            synthesize_inline_composition(parent_name, inline_types, |name, sink| {
+                super::compositions::generate_all_of(
+                    name,
+                    all_of,
+                    schema.schema_data.description.as_ref(),
+                    sink,
+                )
+            })
+        }
+        SchemaKind::Not { .. } | SchemaKind::Any(_) => {
+            // Intentionally unsupported: emit untyped JSON.
             quote! { ::serde_json::Value }
         }
     }
 }
 
+/// Either synthesize a top-level composition type (when a parent name is
+/// available) and return a reference to it, or fall back to
+/// `serde_json::Value`.
+fn synthesize_inline_composition(
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+    generate: impl FnOnce(&str, &mut Vec<TokenStream>) -> TokenStream,
+) -> TokenStream {
+    parent_name.map_or_else(
+        || quote! { ::serde_json::Value },
+        |name| {
+            let tokens = generate(name, inline_types);
+            inline_types.push(tokens);
+            let ident = format_ident!("{}", name);
+            quote! { #ident }
+        },
+    )
+}
+
 /// Convert a primitive `OpenAPI` type to a Rust type token stream.
-fn primitive_type_to_rust(t: &Type) -> TokenStream {
+fn primitive_type_to_rust(
+    t: &Type,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
     match t {
         Type::Integer(i) => {
             if i.format == openapiv3::VariantOrUnknownOrEmpty::Item(IntegerFormat::Int32) {
@@ -83,7 +166,7 @@ fn primitive_type_to_rust(t: &Type) -> TokenStream {
         Type::Array(a) => {
             let item_ty = a.items.as_ref().map_or_else(
                 || quote! { ::serde_json::Value },
-                |items| ref_or_to_inner_type(&items.clone().unbox()),
+                |items| ref_or_to_inner_type_ctx(&items.clone().unbox(), parent_name, inline_types),
             );
             quote! { ::std::vec::Vec<#item_ty> }
         }
