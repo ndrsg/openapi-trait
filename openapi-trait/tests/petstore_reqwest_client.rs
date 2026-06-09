@@ -22,7 +22,7 @@ struct DerivedPetstoreClient {
 }
 
 impl petstore_server::PetstoreServerApi for RichMockPetstore {
-    type Error = ::std::convert::Infallible;
+    type Error = petstore_server::NotImplemented;
 
     async fn get_pet_by_id(
         &self,

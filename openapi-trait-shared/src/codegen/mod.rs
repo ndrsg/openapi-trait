@@ -1,3 +1,4 @@
+pub mod compositions;
 pub mod operations;
 pub mod schemas;
 pub mod types;

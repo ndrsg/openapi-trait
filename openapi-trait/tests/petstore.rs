@@ -11,7 +11,7 @@ use petstore::PetstoreApi as _;
 struct MockPetstore;
 
 impl petstore::PetstoreApi for MockPetstore {
-    type Error = ::std::convert::Infallible;
+    type Error = petstore::NotImplemented;
 }
 
 #[test]
@@ -78,7 +78,7 @@ async fn axum_server_returns_404_for_unknown_route() {
 struct RichMockPetstore;
 
 impl petstore::PetstoreApi for RichMockPetstore {
-    type Error = ::std::convert::Infallible;
+    type Error = petstore::NotImplemented;
 
     async fn get_pet_by_id(
         &self,

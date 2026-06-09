@@ -23,7 +23,7 @@ struct AppState;
 struct MyServer;
 
 impl petstore::PetstoreApi<AppState> for MyServer {
-    type Error = std::convert::Infallible;
+    type Error = petstore::NotImplemented;
 
     async fn get_pet_by_id(
         &self,
@@ -84,6 +84,7 @@ For every OpenAPI spec the macro emits inside the target module:
 | `{ModName}Api<S = ()>` trait | One method per `operationId` for server implementations |
 | `{ModName}Client` trait | One method per `operationId` for transport-agnostic client implementations |
 | `router` method on the trait | Wires all operations to an `axum::Router` when using `openapi_trait::axum` |
+| `NotImplemented` marker struct | Emitted by `openapi_trait::axum`; trait default method bodies return `Err(NotImplemented.into())`, so `Self::Error` must satisfy `From<NotImplemented>` |
 
 ## Crates
 
@@ -162,5 +163,9 @@ openapi-trait = { version = "0.1", default-features = false }
 | Header parameters | ✅ |
 | Request bodies (JSON) | ✅ |
 | Response enums per operation | ✅ |
-| `allOf` / `anyOf` / `oneOf` | Partial — falls back to `serde_json::Value` |
+| `oneOf` | ✅ — tagged enum when a `discriminator` is present, otherwise `#[serde(untagged)]` |
+| `allOf` | ✅ — merged struct (`$ref` branches via `#[serde(flatten)]`, inline objects inlined) |
+| `anyOf` | ✅ — `#[serde(untagged)]` enum |
+| Inline compositions in object properties | ✅ — hoisted to a top-level type named `{ParentStruct}{Property}` |
+| `not` / unconstrained `any` | Falls back to `serde_json::Value` |
 | Security schemes | Not planned for v0.1 |

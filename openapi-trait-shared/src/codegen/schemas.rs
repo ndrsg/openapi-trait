@@ -3,22 +3,31 @@ use openapiv3::{Components, OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::types::{is_string_enum, ref_to_ident, schema_to_rust_type, string_enum_values};
+use super::compositions::{generate_all_of, generate_any_of, generate_one_of};
+use super::types::{is_string_enum, ref_to_ident, schema_to_rust_type_ctx, string_enum_values};
 
 /// Generate all schema structs and enums from `components/schemas`.
+///
+/// Any inline `oneOf` / `allOf` / `anyOf` encountered inside an object property
+/// is hoisted to a synthesized top-level type and emitted alongside the named
+/// schemas, so the resulting module is self-contained.
 #[must_use]
 pub fn generate_schemas(openapi: &OpenAPI) -> TokenStream {
     let Some(components) = &openapi.components else {
         return quote! {};
     };
 
+    let mut inline_types: Vec<TokenStream> = Vec::new();
     let items: Vec<TokenStream> = components
         .schemas
         .iter()
-        .map(|(name, ref_or)| generate_schema_item(name, ref_or, components))
+        .map(|(name, ref_or)| generate_schema_item(name, ref_or, components, &mut inline_types))
         .collect();
 
-    quote! { #(#items)* }
+    quote! {
+        #(#items)*
+        #(#inline_types)*
+    }
 }
 
 /// Generate a single schema item (enum, struct, or type alias).
@@ -26,6 +35,7 @@ fn generate_schema_item(
     name: &str,
     ref_or: &ReferenceOr<Schema>,
     components: &Components,
+    inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     let schema = match ref_or {
         ReferenceOr::Item(s) => s,
@@ -38,17 +48,41 @@ fn generate_schema_item(
     };
 
     if is_string_enum(schema) {
-        generate_string_enum(name, schema)
-    } else if let SchemaKind::Type(Type::Object(obj)) = &schema.schema_kind {
-        generate_object_struct(name, schema, obj, components)
-    } else {
-        // Array, integer, etc. at top level: emit a newtype alias.
-        let ident = format_ident!("{}", name);
-        let inner = schema_to_rust_type(ref_or, true);
-        let doc = doc_attr(&schema.schema_data.description);
-        quote! {
-            #doc
-            pub type #ident = #inner;
+        return generate_string_enum(name, schema);
+    }
+
+    match &schema.schema_kind {
+        SchemaKind::OneOf { one_of } => generate_one_of(
+            name,
+            one_of,
+            schema.schema_data.discriminator.as_ref(),
+            schema.schema_data.description.as_ref(),
+            inline_types,
+        ),
+        SchemaKind::AnyOf { any_of } => generate_any_of(
+            name,
+            any_of,
+            schema.schema_data.description.as_ref(),
+            inline_types,
+        ),
+        SchemaKind::AllOf { all_of } => generate_all_of(
+            name,
+            all_of,
+            schema.schema_data.description.as_ref(),
+            inline_types,
+        ),
+        SchemaKind::Type(Type::Object(obj)) => {
+            generate_object_struct(name, schema, obj, components, inline_types)
+        }
+        _ => {
+            // Array, integer, etc. at top level: emit a newtype alias.
+            let ident = format_ident!("{}", name);
+            let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), inline_types);
+            let doc = doc_attr(&schema.schema_data.description);
+            quote! {
+                #doc
+                pub type #ident = #inner;
+            }
         }
     }
 }
@@ -94,6 +128,7 @@ fn generate_object_struct(
     schema: &Schema,
     obj: &openapiv3::ObjectType,
     _components: &Components,
+    inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     let ident = format_ident!("{}", name);
     let doc = doc_attr(&schema.schema_data.description);
@@ -102,31 +137,14 @@ fn generate_object_struct(
         .properties
         .iter()
         .map(|(prop_name, prop_ref_or)| {
-            // Check actual required array on the object
             let is_required = obj.required.iter().any(|r| r == prop_name);
-
-            let snake = prop_name.to_snake_case();
-            // Escape Rust keywords (e.g. `type` -> `r#type`)
-            let field_ident = keyword_safe_ident(&snake);
-            // Always emit rename if either the snake conversion or keyword escaping changed the name
-            let rename_attr = {
-                let n = prop_name.as_str();
-                quote! { #[serde(rename = #n)] }
-            };
-
-            // Get description from the property schema if it's inline
-            let field_doc = match prop_ref_or {
-                ReferenceOr::Item(s) => doc_attr(&s.schema_data.description),
-                ReferenceOr::Reference { .. } => quote! {},
-            };
-
-            let field_type = schema_to_rust_type(&prop_ref_or.clone().unbox(), is_required);
-
-            quote! {
-                #field_doc
-                #rename_attr
-                pub #field_ident: #field_type,
-            }
+            object_field_tokens(
+                prop_name,
+                &prop_ref_or.clone().unbox(),
+                is_required,
+                name,
+                inline_types,
+            )
         })
         .collect();
 
@@ -142,6 +160,44 @@ fn generate_object_struct(
         pub struct #ident {
             #(#fields)*
         }
+    }
+}
+
+/// Emit a single struct field for an object property. Shared between
+/// [`generate_object_struct`] and the `allOf` merger in
+/// [`super::compositions`].
+///
+/// `parent_struct_name` is used as the prefix for any inline composition
+/// encountered in this property, so that hoisted types get a stable, readable
+/// name like `PersonAddress`.
+#[must_use]
+pub fn object_field_tokens(
+    prop_name: &str,
+    prop_ref_or: &ReferenceOr<Schema>,
+    is_required: bool,
+    parent_struct_name: &str,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
+    let snake = prop_name.to_snake_case();
+    let field_ident = keyword_safe_ident(&snake);
+    let rename_attr = {
+        let n = prop_name;
+        quote! { #[serde(rename = #n)] }
+    };
+
+    let field_doc = match prop_ref_or {
+        ReferenceOr::Item(s) => doc_attr(&s.schema_data.description),
+        ReferenceOr::Reference { .. } => quote! {},
+    };
+
+    let synth_name = format!("{parent_struct_name}{}", prop_name.to_pascal_case());
+    let field_type =
+        schema_to_rust_type_ctx(prop_ref_or, is_required, Some(&synth_name), inline_types);
+
+    quote! {
+        #field_doc
+        #rename_attr
+        pub #field_ident: #field_type,
     }
 }
 

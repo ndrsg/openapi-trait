@@ -1,0 +1,41 @@
+# Adapted from OpenAPITools/openapi-generator
+# `modules/openapi-generator/src/test/resources/3_0/oneOf.yaml` (Apache-2.0).
+# Schema names are PascalCased to map cleanly onto Rust idents.
+openapi: 3.0.1
+info:
+  title: fruity
+  version: 0.0.1
+paths:
+  /fruit:
+    get:
+      operationId: getFruit
+      responses:
+        '200':
+          description: a fruit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fruit'
+components:
+  schemas:
+    Fruit:
+      oneOf:
+        - $ref: '#/components/schemas/Apple'
+        - $ref: '#/components/schemas/Banana'
+        - $ref: '#/components/schemas/Orange'
+    Apple:
+      type: object
+      properties:
+        kind:
+          type: string
+    Banana:
+      type: object
+      properties:
+        count:
+          type: integer
+          format: int32
+    Orange:
+      type: object
+      properties:
+        sweet:
+          type: boolean

@@ -19,7 +19,7 @@
 //! struct AppState;
 //!
 //! impl petstore::PetstoreApi<AppState> for MyServer {
-//!     type Error = std::convert::Infallible;
+//!     type Error = petstore::NotImplemented;
 //!
 //!     async fn get_pet_by_id(
 //!         &self,

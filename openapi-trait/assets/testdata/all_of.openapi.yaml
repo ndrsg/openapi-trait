@@ -1,0 +1,65 @@
+# Adapted from OpenAPITools/openapi-generator
+# `modules/openapi-generator/src/test/resources/3_0/allOf.yaml` (Apache-2.0).
+# Operation operationIds added; the discriminator's property name is
+# `kind` (renamed from the original `$_type`) so the synthesized Rust
+# field name stays a plain identifier.
+openapi: 3.0.1
+info:
+  version: 1.0.0
+  title: Example
+paths:
+  /person/{personId}:
+    get:
+      operationId: getPerson
+      parameters:
+        - name: personId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Person'
+components:
+  schemas:
+    Person:
+      type: object
+      discriminator:
+        propertyName: kind
+        mapping:
+          a: '#/components/schemas/Adult'
+          c: Child
+      required:
+        - kind
+        - lastName
+        - firstName
+      properties:
+        kind:
+          type: string
+        lastName:
+          type: string
+        firstName:
+          type: string
+    Adult:
+      description: A representation of an adult
+      allOf:
+        - $ref: '#/components/schemas/Person'
+        - type: object
+          required: [hasChildren]
+          properties:
+            hasChildren:
+              type: boolean
+    Child:
+      description: A representation of a child
+      allOf:
+        - $ref: '#/components/schemas/Person'
+        - type: object
+          required: [age]
+          properties:
+            age:
+              type: integer
+              format: int32
