@@ -1,6 +1,7 @@
 pub mod compositions;
 pub mod operations;
 pub mod schemas;
+pub mod security;
 pub mod types;
 
 use openapiv3::OpenAPI;

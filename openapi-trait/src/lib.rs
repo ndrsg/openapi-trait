@@ -24,6 +24,7 @@
 //!     async fn get_pet_by_id(
 //!         &self,
 //!         req: petstore::GetPetByIdRequest,
+//!         _auth: petstore::ApiKey,
 //!         _state: axum::extract::State<AppState>,
 //!         _headers: axum::http::HeaderMap,
 //!     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
@@ -154,7 +155,20 @@ impl RequestOptions {
     }
 }
 
+/// Sibling of [`ReqwestClientCore`] for clients that carry credentials.
+///
+/// Implemented automatically by [`ReqwestClient`] when the carrier struct has
+/// a field annotated `#[openapi_trait(auth)]` (or named `auth`). The generic
+/// `A` is the generated `{Mod}AuthState` struct for the spec.
+#[cfg(feature = "reqwest-client")]
+pub trait ReqwestClientAuth<A> {
+    /// Borrow the auth-state struct holding configured credentials.
+    fn auth_state(&self) -> &A;
+}
+
 #[cfg(feature = "reqwest-client")]
 pub use percent_encoding;
 #[cfg(feature = "reqwest-client")]
 pub use reqwest;
+
+pub use base64;

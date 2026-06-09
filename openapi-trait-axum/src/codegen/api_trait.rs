@@ -3,14 +3,22 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::OperationInfo;
+use openapi_trait_shared::codegen::security::{auth_enum_ident, resolve_alternatives, SchemeInfo};
 
 /// Generate the `{ModName}Api` trait with one `async fn` per operation,
 /// preceded by the per-module `NotImplemented` marker that the trait's default
 /// method bodies use to signal "this operation was not overridden".
-pub fn generate_trait(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> TokenStream {
+pub fn generate_trait(
+    mod_ident: &syn::Ident,
+    ops: &[OperationInfo],
+    schemes: &[SchemeInfo],
+) -> TokenStream {
     let trait_name = format_ident!("{}Api", mod_ident.to_string().to_pascal_case());
 
-    let methods: Vec<TokenStream> = ops.iter().map(generate_trait_method).collect();
+    let methods: Vec<TokenStream> = ops
+        .iter()
+        .map(|op| generate_trait_method(op, schemes))
+        .collect();
 
     quote! {
         /// Marker error returned by default trait method implementations.
@@ -59,7 +67,7 @@ pub fn generate_trait(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> TokenStr
 }
 
 /// Generate a single trait method for one operation.
-fn generate_trait_method(op: &OperationInfo) -> TokenStream {
+fn generate_trait_method(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
@@ -71,15 +79,30 @@ fn generate_trait_method(op: &OperationInfo) -> TokenStream {
         (None, None) => quote! {},
     };
 
+    let alts = resolve_alternatives(&op.auth, schemes);
+    let (auth_param, auth_discard) = match alts.len() {
+        0 => (quote! {}, quote! {}),
+        1 => {
+            let ty = &alts[0].ident;
+            (quote! { auth: #ty, }, quote! { let _ = auth; })
+        }
+        _ => {
+            let ty = auth_enum_ident(&op.operation_id);
+            (quote! { auth: #ty, }, quote! { let _ = auth; })
+        }
+    };
+
     quote! {
         #doc
         fn #method_ident(
             &self,
             req: #req_ident,
+            #auth_param
             state: ::axum::extract::State<S>,
             headers: ::axum::http::HeaderMap,
         ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
             let _ = req;
+            #auth_discard
             let _ = state;
             let _ = headers;
             async {

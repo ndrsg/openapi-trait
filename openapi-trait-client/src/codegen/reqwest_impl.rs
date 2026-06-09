@@ -3,18 +3,76 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::{OperationInfo, ParamInfo, ResponseStatus};
+use openapi_trait_shared::codegen::security::{
+    auth_state_ident, client_auth_trait_ident, resolve_alternatives, scheme_field_ident, ApiKeyIn,
+    SchemeInfo, SchemeKind,
+};
 
 /// Generate a reqwest-backed implementation of the generated client trait.
-pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> TokenStream {
+pub fn generate_reqwest_impl(
+    mod_ident: &syn::Ident,
+    ops: &[OperationInfo],
+    schemes: &[SchemeInfo],
+) -> TokenStream {
     let module_name = mod_ident.to_string().to_pascal_case();
     let trait_name = format_ident!("{}Client", module_name);
     let error_name = format_ident!("Reqwest{}ClientError", module_name);
+    let auth_state = auth_state_ident(mod_ident);
+    let auth_trait = client_auth_trait_ident(mod_ident);
+    let has_auth = !schemes.is_empty();
 
     let methods: Vec<TokenStream> = ops
         .iter()
-        .map(|op| generate_impl_method(op, &error_name))
+        .map(|op| generate_impl_method(op, &error_name, schemes, has_auth))
         .collect();
 
+    let auth_state_def = generate_auth_state_struct(&auth_state, schemes);
+    let auth_trait_def = generate_auth_ext_trait(&auth_trait, &auth_state, schemes);
+    let impl_bound = generate_impl_bound(&auth_state, has_auth);
+    let error_type_def = generate_error_type(&error_name);
+
+    quote! {
+        #auth_state_def
+        #auth_trait_def
+        #error_type_def
+
+        fn encode_path_param(value: &impl ::core::fmt::Display) -> ::std::string::String {
+            ::openapi_trait::percent_encoding::utf8_percent_encode(
+                &value.to_string(),
+                ::openapi_trait::percent_encoding::NON_ALPHANUMERIC,
+            )
+            .to_string()
+        }
+
+        impl<T> #trait_name for T
+        where
+            #impl_bound
+        {
+            type Error = #error_name;
+
+            #(#methods)*
+        }
+    }
+}
+
+/// Generate the where-clause bound on the blanket `Client` impl.
+fn generate_impl_bound(auth_state: &syn::Ident, has_auth: bool) -> TokenStream {
+    if has_auth {
+        quote! {
+            T: ::openapi_trait::ReqwestClientCore
+                + ::openapi_trait::ReqwestClientAuth<#auth_state>
+                + ::core::marker::Send
+                + ::core::marker::Sync,
+        }
+    } else {
+        quote! {
+            T: ::openapi_trait::ReqwestClientCore + ::core::marker::Send + ::core::marker::Sync,
+        }
+    }
+}
+
+/// Generate the `Reqwest{Mod}ClientError` enum and its trait impls.
+fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
     quote! {
         #[derive(::core::fmt::Debug)]
         pub enum #error_name {
@@ -22,6 +80,10 @@ pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> T
             MissingRequiredHeader {
                 operation: &'static str,
                 header: &'static str,
+            },
+            MissingCredential {
+                operation: &'static str,
+                scheme: &'static str,
             },
             UnexpectedStatus {
                 operation: &'static str,
@@ -37,11 +99,10 @@ pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> T
                     Self::MissingRequiredHeader { operation, header } => {
                         write!(formatter, "missing required header `{header}` for `{operation}`")
                     }
-                    Self::UnexpectedStatus {
-                        operation,
-                        status,
-                        body,
-                    } => write!(
+                    Self::MissingCredential { operation, scheme } => {
+                        write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
+                    }
+                    Self::UnexpectedStatus { operation, status, body } => write!(
                         formatter,
                         "unexpected status {status} for `{operation}`: {body}"
                     ),
@@ -53,9 +114,9 @@ pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> T
             fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
                 match self {
                     Self::Transport(error) => ::core::option::Option::Some(error),
-                    Self::MissingRequiredHeader { .. } | Self::UnexpectedStatus { .. } => {
-                        ::core::option::Option::None
-                    }
+                    Self::MissingRequiredHeader { .. }
+                    | Self::MissingCredential { .. }
+                    | Self::UnexpectedStatus { .. } => ::core::option::Option::None,
                 }
             }
         }
@@ -65,28 +126,111 @@ pub fn generate_reqwest_impl(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> T
                 Self::Transport(error)
             }
         }
+    }
+}
 
-        fn encode_path_param(value: &impl ::core::fmt::Display) -> ::std::string::String {
-            ::openapi_trait::percent_encoding::utf8_percent_encode(
-                &value.to_string(),
-                ::openapi_trait::percent_encoding::NON_ALPHANUMERIC,
-            )
-            .to_string()
+/// Generate the `{Mod}AuthState` struct holding configured credentials.
+fn generate_auth_state_struct(ident: &syn::Ident, schemes: &[SchemeInfo]) -> TokenStream {
+    let fields: Vec<TokenStream> = schemes
+        .iter()
+        .map(|s| {
+            let field = scheme_field_ident(s);
+            match &s.kind {
+                SchemeKind::ApiKey { .. } | SchemeKind::HttpBearer => quote! {
+                    pub #field: ::core::option::Option<::std::string::String>,
+                },
+                SchemeKind::HttpBasic => quote! {
+                    pub #field: ::core::option::Option<(::std::string::String, ::std::string::String)>,
+                },
+            }
+        })
+        .collect();
+
+    quote! {
+        #[derive(::core::fmt::Debug, ::core::clone::Clone, ::core::default::Default)]
+        pub struct #ident {
+            #(#fields)*
+        }
+    }
+}
+
+/// Generate the `{Mod}ClientAuth` extension trait + blanket impl.
+fn generate_auth_ext_trait(
+    trait_ident: &syn::Ident,
+    state_ident: &syn::Ident,
+    schemes: &[SchemeInfo],
+) -> TokenStream {
+    if schemes.is_empty() {
+        return quote! {};
+    }
+    let trait_methods: Vec<TokenStream> = schemes
+        .iter()
+        .map(|s| {
+            let setter = format_ident!("with_{}", s.snake);
+            if matches!(s.kind, SchemeKind::HttpBasic) {
+                quote! {
+                    fn #setter(
+                        self,
+                        username: impl ::core::convert::Into<::std::string::String>,
+                        password: impl ::core::convert::Into<::std::string::String>,
+                    ) -> Self;
+                }
+            } else {
+                quote! {
+                    fn #setter(self, value: impl ::core::convert::Into<::std::string::String>) -> Self;
+                }
+            }
+        })
+        .collect();
+
+    let impl_methods: Vec<TokenStream> = schemes
+        .iter()
+        .map(|s| {
+            let setter = format_ident!("with_{}", s.snake);
+            let field = scheme_field_ident(s);
+            if matches!(s.kind, SchemeKind::HttpBasic) {
+                quote! {
+                    fn #setter(
+                        mut self,
+                        username: impl ::core::convert::Into<::std::string::String>,
+                        password: impl ::core::convert::Into<::std::string::String>,
+                    ) -> Self {
+                        self.as_mut().#field = ::core::option::Option::Some((username.into(), password.into()));
+                        self
+                    }
+                }
+            } else {
+                quote! {
+                    fn #setter(mut self, value: impl ::core::convert::Into<::std::string::String>) -> Self {
+                        self.as_mut().#field = ::core::option::Option::Some(value.into());
+                        self
+                    }
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        pub trait #trait_ident: ::core::marker::Sized {
+            #(#trait_methods)*
         }
 
-        impl<T> #trait_name for T
+        impl<T> #trait_ident for T
         where
-            T: ::openapi_trait::ReqwestClientCore + ::core::marker::Send + ::core::marker::Sync,
+            T: ::core::convert::AsMut<#state_ident> + ::core::marker::Sized,
         {
-            type Error = #error_name;
-
-            #(#methods)*
+            #(#impl_methods)*
         }
     }
 }
 
 /// Generate one reqwest-backed trait method for a single `OpenAPI` operation.
-fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> TokenStream {
+fn generate_impl_method(
+    op: &OperationInfo,
+    error_name: &proc_macro2::Ident,
+    schemes: &[SchemeInfo],
+    has_auth: bool,
+) -> TokenStream {
     let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
@@ -122,6 +266,16 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
     let (response_arms, fallback) =
         generate_response_match(op, error_name, &resp_ident, operation_name);
 
+    let alts = resolve_alternatives(&op.auth, schemes);
+    let auth_setup = if has_auth && !alts.is_empty() {
+        quote! {
+            let auth_state = ::openapi_trait::ReqwestClientAuth::auth_state(self).clone();
+        }
+    } else {
+        quote! {}
+    };
+    let auth_inject = generate_auth_inject(op, &alts, error_name, operation_name);
+
     quote! {
         fn #method_ident(
             &self,
@@ -130,6 +284,7 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
         ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
             let client = ::openapi_trait::ReqwestClientCore::reqwest_client(self).clone();
             let base_url = ::openapi_trait::ReqwestClientCore::base_url(self).to_owned();
+            #auth_setup
 
             async move {
                 let #req_ident { #(#request_fields),* } = req;
@@ -143,6 +298,7 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
                 #query_builder
                 #header_builder
                 #body_builder
+                #auth_inject
 
                 let request = match options {
                     ::core::option::Option::Some(options) => options.apply(request),
@@ -158,6 +314,121 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
                 }
             }
         }
+    }
+}
+
+/// Emit credential injection code for one operation.
+fn generate_auth_inject(
+    op: &OperationInfo,
+    alts: &[&SchemeInfo],
+    error_name: &proc_macro2::Ident,
+    operation_name: &str,
+) -> TokenStream {
+    if alts.is_empty() {
+        return quote! {};
+    }
+
+    let scheme_label = op.auth.alternatives.join(",");
+
+    if alts.len() == 1 {
+        let inject = inject_scheme_expr(alts[0]);
+        return quote! {
+            let __injected = #inject;
+            if !__injected {
+                return ::core::result::Result::Err(#error_name::MissingCredential {
+                    operation: #operation_name,
+                    scheme: #scheme_label,
+                });
+            }
+        };
+    }
+
+    let attempts: Vec<TokenStream> = alts
+        .iter()
+        .map(|s| {
+            let inject = inject_scheme_expr(s);
+            quote! {
+                if !__injected {
+                    __injected = #inject;
+                }
+            }
+        })
+        .collect();
+
+    quote! {
+        let mut __injected = false;
+        #(#attempts)*
+        if !__injected {
+            return ::core::result::Result::Err(#error_name::MissingCredential {
+                operation: #operation_name,
+                scheme: #scheme_label,
+            });
+        }
+    }
+}
+
+/// Produce a boolean expression: attempts to inject a single scheme into `request`,
+/// returning whether the credential was set.
+fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
+    let field = scheme_field_ident(scheme);
+    match &scheme.kind {
+        SchemeKind::ApiKey {
+            key,
+            location: ApiKeyIn::Header,
+        } => quote! {
+            match &auth_state.#field {
+                ::core::option::Option::Some(v) => {
+                    request = request.header(#key, v);
+                    true
+                }
+                ::core::option::Option::None => false,
+            }
+        },
+        SchemeKind::ApiKey {
+            key,
+            location: ApiKeyIn::Query,
+        } => quote! {
+            match &auth_state.#field {
+                ::core::option::Option::Some(v) => {
+                    request = request.query(&[(#key, v.as_str())]);
+                    true
+                }
+                ::core::option::Option::None => false,
+            }
+        },
+        SchemeKind::ApiKey {
+            key,
+            location: ApiKeyIn::Cookie,
+        } => quote! {
+            match &auth_state.#field {
+                ::core::option::Option::Some(v) => {
+                    request = request.header(
+                        ::openapi_trait::reqwest::header::COOKIE,
+                        ::std::format!("{}={}", #key, v),
+                    );
+                    true
+                }
+                ::core::option::Option::None => false,
+            }
+        },
+        SchemeKind::HttpBearer => quote! {
+            match &auth_state.#field {
+                ::core::option::Option::Some(v) => {
+                    request = request.bearer_auth(v);
+                    true
+                }
+                ::core::option::Option::None => false,
+            }
+        },
+        SchemeKind::HttpBasic => quote! {
+            match &auth_state.#field {
+                ::core::option::Option::Some((u, p)) => {
+                    request = request.basic_auth(u, ::core::option::Option::Some(p));
+                    true
+                }
+                ::core::option::Option::None => false,
+            }
+        },
     }
 }
 

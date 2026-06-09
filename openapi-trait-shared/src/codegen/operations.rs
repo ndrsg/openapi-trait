@@ -7,6 +7,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::schemas::doc_attr;
+use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
 use super::types::{is_string_enum, schema_to_rust_type, string_enum_values};
 
 /// All information about a single API operation needed by later codegen stages.
@@ -22,6 +23,7 @@ pub struct OperationInfo {
     pub header_params: Vec<ParamInfo>,
     pub body: Option<BodyInfo>,
     pub responses: Vec<ResponseInfo>,
+    pub auth: OpSecurity,
 }
 
 #[derive(Debug)]
@@ -61,7 +63,7 @@ pub enum ResponseStatus {
 
 /// Collect all operations from the `OpenAPI` document.
 #[must_use]
-pub fn collect_operations(openapi: &OpenAPI) -> Vec<OperationInfo> {
+pub fn collect_operations(openapi: &OpenAPI, schemes: &[SchemeInfo]) -> Vec<OperationInfo> {
     let mut ops = Vec::new();
     for (path, ref_or_item) in &openapi.paths.paths {
         let item = match ref_or_item {
@@ -69,7 +71,9 @@ pub fn collect_operations(openapi: &OpenAPI) -> Vec<OperationInfo> {
             ReferenceOr::Reference { .. } => continue,
         };
         for (method, operation) in path_item_operations(item) {
-            if let Some(info) = build_operation_info(path, &method, operation, item, openapi) {
+            if let Some(info) =
+                build_operation_info(path, &method, operation, item, openapi, schemes)
+            {
                 ops.push(info);
             }
         }
@@ -114,6 +118,7 @@ fn build_operation_info(
     operation: &Operation,
     path_item: &PathItem,
     openapi: &OpenAPI,
+    schemes: &[SchemeInfo],
 ) -> Option<OperationInfo> {
     let operation_id = operation.operation_id.clone()?;
 
@@ -193,6 +198,7 @@ fn build_operation_info(
         .and_then(|rb| build_body_info(rb, openapi));
 
     let responses = build_responses(&operation.responses, openapi);
+    let auth = resolve_op_security(operation, openapi, schemes);
 
     Some(OperationInfo {
         operation_id,
@@ -205,6 +211,7 @@ fn build_operation_info(
         header_params,
         body,
         responses,
+        auth,
     })
 }
 
