@@ -199,4 +199,38 @@ openapi-trait = { version = "0.1", default-features = false }
 | `anyOf` | ✅ — `#[serde(untagged)]` enum |
 | Inline compositions in object properties | ✅ — hoisted to a top-level type named `{ParentStruct}{Property}` |
 | `not` / unconstrained `any` | Falls back to `serde_json::Value` |
-| Security schemes | Not planned for v0.1 |
+| Security schemes | ✅ — `apiKey` (header/query/cookie) and `http` (bearer + basic); `oauth2` / `openIdConnect` recognised but skipped |
+
+## Security
+
+For each scheme declared in `components.securitySchemes`, a typed struct is generated (named after the scheme key, PascalCased): `apiKey`-style schemes become a newtype `pub struct Foo(pub String)`, `http basic` becomes `pub struct Foo { username, password }`. Operation-level `security` overrides the document-level default; `security: []` disables auth on an operation; an `OR` of alternatives generates an `{Op}Auth` enum with one variant per scheme.
+
+**Server (axum)** — handlers receive credentials as an extra `auth` parameter; the framework only extracts the raw value, the handler validates:
+
+```rust
+async fn get_admin(
+    &self,
+    req: api::GetAdminRequest,
+    auth: api::BearerAuth,
+    state: axum::extract::State<S>,
+    headers: axum::http::HeaderMap,
+) -> Result<api::GetAdminResponse, Self::Error> { /* ... */ }
+```
+
+Missing credentials return `401 Unauthorized` before the handler runs.
+
+**Client (reqwest)** — credentials live on the client carrier and are injected on every call. Add a field for the generated `{Mod}AuthState` and mark it `#[openapi_trait(auth)]`; the generated `{Mod}ClientAuth` extension trait supplies fluent `with_<scheme>(...)` setters:
+
+```rust
+#[derive(Clone, openapi_trait::ReqwestClient)]
+struct MyClient {
+    #[openapi_trait(client)] http: reqwest::Client,
+    #[openapi_trait(base_url)] base_url: String,
+    #[openapi_trait(auth)] auth: api::ApiAuthState,
+}
+
+use api::ApiClientAuth as _;
+let client = MyClient { /* ... */ }.with_bearer_auth("token");
+```
+
+Server and client signatures differ intentionally: server handlers see credentials per-call (so RBAC decisions can vary by request); clients carry them session-wide.

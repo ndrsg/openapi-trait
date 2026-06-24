@@ -11,20 +11,44 @@ use api_trait::generate_trait;
 use openapi_trait_shared::codegen::{
     operations::{collect_operations, generate_operation_types},
     schemas::generate_schemas,
+    security::{
+        collect_schemes, generate_op_auth_enum, generate_scheme_types, resolve_alternatives,
+    },
 };
 use router::generate_router;
 
 /// Generate schemas + operation types + trait + axum router.
 pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
-    let schemas = generate_schemas(openapi);
-    let ops = collect_operations(openapi);
+    let auth_schemes = collect_schemes(openapi);
+    let schema_types = generate_schemas(openapi);
+    let ops = collect_operations(openapi, &auth_schemes);
     let op_types = generate_operation_types(&ops);
-    let api_trait = generate_trait(mod_ident, &ops);
-    let router = generate_router(mod_ident, &ops);
+
+    let auth_types = generate_scheme_types(&auth_schemes);
+    let op_auth_enums: Vec<TokenStream> = ops
+        .iter()
+        .filter_map(|op| {
+            let alts = resolve_alternatives(&op.auth, &auth_schemes);
+            generate_op_auth_enum(&op.operation_id, &alts)
+        })
+        .collect();
+
+    let unsupported_and = openapi_trait_shared::codegen::security::generate_unsupported_and_errors(
+        &ops.iter()
+            .filter(|op| op.auth.had_unsupported_and)
+            .map(|op| op.operation_id.clone())
+            .collect::<Vec<_>>(),
+    );
+
+    let api_trait = generate_trait(mod_ident, &ops, &auth_schemes);
+    let router = generate_router(mod_ident, &ops, &auth_schemes);
 
     quote! {
         use super::*;
-        #schemas
+        #unsupported_and
+        #schema_types
+        #auth_types
+        #(#op_auth_enums)*
         #op_types
         #api_trait
         #router

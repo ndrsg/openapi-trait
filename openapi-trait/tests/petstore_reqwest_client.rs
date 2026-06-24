@@ -19,6 +19,8 @@ struct DerivedPetstoreClient {
     http: ::reqwest::Client,
     #[openapi_trait(base_url)]
     endpoint: String,
+    #[openapi_trait(auth)]
+    creds: petstore::PetstoreAuthState,
 }
 
 impl petstore_server::PetstoreServerApi for RichMockPetstore {
@@ -27,6 +29,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
     async fn get_pet_by_id(
         &self,
         req: petstore_server::GetPetByIdRequest,
+        _auth: petstore_server::ApiKey,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
@@ -95,9 +98,14 @@ async fn spawn_server() -> std::string::String {
 #[tokio::test]
 async fn generated_reqwest_client_handles_path_params() {
     let base_url = spawn_server().await;
-    let client = DerivedPetstoreClient {
-        http: openapi_trait::reqwest::Client::new(),
-        endpoint: base_url,
+    let client = {
+        use petstore::PetstoreClientAuth as _;
+        DerivedPetstoreClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base_url,
+            creds: petstore::PetstoreAuthState::default(),
+        }
+        .with_api_key("k")
     };
 
     let response = client
@@ -114,9 +122,14 @@ async fn generated_reqwest_client_handles_path_params() {
 #[tokio::test]
 async fn generated_reqwest_client_handles_query_params() {
     let base_url = spawn_server().await;
-    let client = DerivedPetstoreClient {
-        http: openapi_trait::reqwest::Client::new(),
-        endpoint: base_url,
+    let client = {
+        use petstore::PetstoreClientAuth as _;
+        DerivedPetstoreClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base_url,
+            creds: petstore::PetstoreAuthState::default(),
+        }
+        .with_api_key("k")
     };
 
     let response = client
@@ -138,9 +151,14 @@ async fn generated_reqwest_client_handles_query_params() {
 #[tokio::test]
 async fn generated_reqwest_client_handles_json_bodies() {
     let base_url = spawn_server().await;
-    let client = DerivedPetstoreClient {
-        http: openapi_trait::reqwest::Client::new(),
-        endpoint: base_url,
+    let client = {
+        use petstore::PetstoreClientAuth as _;
+        DerivedPetstoreClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base_url,
+            creds: petstore::PetstoreAuthState::default(),
+        }
+        .with_api_key("k")
     };
 
     let response = client
@@ -179,6 +197,7 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
     async fn get_pet_by_id(
         &self,
         req: petstore_server::GetPetByIdRequest,
+        _auth: petstore_server::ApiKey,
         _state: axum::extract::State<()>,
         headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
@@ -235,9 +254,14 @@ async fn generated_reqwest_client_applies_per_request_headers_and_auth() {
             .unwrap();
     });
 
-    let client = DerivedPetstoreClient {
-        http: openapi_trait::reqwest::Client::new(),
-        endpoint: base_url,
+    let client = {
+        use petstore::PetstoreClientAuth as _;
+        DerivedPetstoreClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base_url,
+            creds: petstore::PetstoreAuthState::default(),
+        }
+        .with_api_key("k")
     };
 
     client

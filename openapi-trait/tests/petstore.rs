@@ -50,6 +50,7 @@ async fn axum_server_routes_matched_path() {
     // Matched route: default impl returns Default → 500 INTERNAL_SERVER_ERROR
     let status = client
         .get(format!("http://{addr}/pet/42"))
+        .header("api_key", "k")
         .send()
         .await
         .unwrap()
@@ -83,6 +84,7 @@ impl petstore::PetstoreApi for RichMockPetstore {
     async fn get_pet_by_id(
         &self,
         req: petstore::GetPetByIdRequest,
+        _auth: petstore::ApiKey,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
@@ -116,6 +118,7 @@ async fn axum_server_get_pet_by_id_returns_200_and_404() {
     // Known pet → 200 with JSON body
     let resp = client
         .get(format!("http://{addr}/pet/42"))
+        .header("api_key", "k")
         .send()
         .await
         .unwrap();
@@ -127,6 +130,7 @@ async fn axum_server_get_pet_by_id_returns_200_and_404() {
     // Unknown pet → 404
     let status = client
         .get(format!("http://{addr}/pet/99"))
+        .header("api_key", "k")
         .send()
         .await
         .unwrap()

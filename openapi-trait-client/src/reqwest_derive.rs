@@ -2,6 +2,85 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Data, DeriveInput, Error, Fields};
 
+/// Resolved field bindings for the `ReqwestClient` derive.
+struct ResolvedFields {
+    /// Field holding the `reqwest::Client`.
+    client: syn::Ident,
+    /// Field holding the base URL.
+    base_url: syn::Ident,
+    /// Field holding the generated `{Mod}AuthState`, if any.
+    auth: Option<(syn::Ident, syn::Type)>,
+}
+
+/// Walk the struct's named fields and pick out the client/base-url/auth bindings.
+fn resolve_fields(
+    container: &syn::Ident,
+    fields: syn::punctuated::Punctuated<syn::Field, syn::Token![,]>,
+) -> syn::Result<ResolvedFields> {
+    let mut explicit_client = None;
+    let mut explicit_base_url = None;
+    let mut explicit_auth: Option<(syn::Ident, syn::Type)> = None;
+    let mut default_client = None;
+    let mut default_base_url = None;
+    let mut default_auth: Option<(syn::Ident, syn::Type)> = None;
+
+    for field in fields {
+        let field_ident = field.ident.expect("named fields always have identifiers");
+        let markers = parse_markers(&field.attrs)?;
+
+        if field_ident == "client" {
+            default_client = Some(field_ident.clone());
+        }
+        if field_ident == "base_url" {
+            default_base_url = Some(field_ident.clone());
+        }
+        if field_ident == "auth" {
+            default_auth = Some((field_ident.clone(), field.ty.clone()));
+        }
+
+        if markers.client && explicit_client.replace(field_ident.clone()).is_some() {
+            return Err(Error::new_spanned(
+                &field_ident,
+                "duplicate #[openapi_trait(client)] field",
+            ));
+        }
+        if markers.base_url && explicit_base_url.replace(field_ident.clone()).is_some() {
+            return Err(Error::new_spanned(
+                &field_ident,
+                "duplicate #[openapi_trait(base_url)] field",
+            ));
+        }
+        if markers.auth
+            && explicit_auth
+                .replace((field_ident.clone(), field.ty.clone()))
+                .is_some()
+        {
+            return Err(Error::new_spanned(
+                &field_ident,
+                "duplicate #[openapi_trait(auth)] field",
+            ));
+        }
+    }
+
+    let client = explicit_client.or(default_client).ok_or_else(|| {
+        Error::new_spanned(
+            container,
+            "ReqwestClient derive requires a `client` field or #[openapi_trait(client)]",
+        )
+    })?;
+    let base_url = explicit_base_url.or(default_base_url).ok_or_else(|| {
+        Error::new_spanned(
+            container,
+            "ReqwestClient derive requires a `base_url` field or #[openapi_trait(base_url)]",
+        )
+    })?;
+    Ok(ResolvedFields {
+        client,
+        base_url,
+        auth: explicit_auth.or(default_auth),
+    })
+}
+
 /// Expand `#[derive(ReqwestClient)]` for a user-owned reqwest client carrier type.
 pub fn expand_reqwest_client(input: DeriveInput) -> syn::Result<TokenStream> {
     let ident = input.ident;
@@ -25,49 +104,33 @@ pub fn expand_reqwest_client(input: DeriveInput) -> syn::Result<TokenStream> {
         }
     };
 
-    let mut explicit_client = None;
-    let mut explicit_base_url = None;
-    let mut default_client = None;
-    let mut default_base_url = None;
+    let resolved = resolve_fields(&ident, fields)?;
+    let client_field = resolved.client;
+    let base_url_field = resolved.base_url;
 
-    for field in fields {
-        let field_ident = field.ident.expect("named fields always have identifiers");
-        let markers = parse_markers(&field.attrs)?;
+    let auth_impls = if let Some((field, ty)) = resolved.auth {
+        quote! {
+            #[automatically_derived]
+            impl #impl_generics ::openapi_trait::ReqwestClientAuth<#ty>
+                for #ident #ty_generics #where_clause
+            {
+                fn auth_state(&self) -> &#ty {
+                    &self.#field
+                }
+            }
 
-        if field_ident == "client" {
-            default_client = Some(field_ident.clone());
+            #[automatically_derived]
+            impl #impl_generics ::core::convert::AsMut<#ty>
+                for #ident #ty_generics #where_clause
+            {
+                fn as_mut(&mut self) -> &mut #ty {
+                    &mut self.#field
+                }
+            }
         }
-        if field_ident == "base_url" {
-            default_base_url = Some(field_ident.clone());
-        }
-
-        if markers.client && explicit_client.replace(field_ident.clone()).is_some() {
-            return Err(Error::new_spanned(
-                &field_ident,
-                "duplicate #[openapi_trait(client)] field",
-            ));
-        }
-
-        if markers.base_url && explicit_base_url.replace(field_ident.clone()).is_some() {
-            return Err(Error::new_spanned(
-                &field_ident,
-                "duplicate #[openapi_trait(base_url)] field",
-            ));
-        }
-    }
-
-    let client_field = explicit_client.or(default_client).ok_or_else(|| {
-        Error::new_spanned(
-            &ident,
-            "ReqwestClient derive requires a `client` field or #[openapi_trait(client)]",
-        )
-    })?;
-    let base_url_field = explicit_base_url.or(default_base_url).ok_or_else(|| {
-        Error::new_spanned(
-            &ident,
-            "ReqwestClient derive requires a `base_url` field or #[openapi_trait(base_url)]",
-        )
-    })?;
+    } else {
+        quote! {}
+    };
 
     Ok(quote! {
         #[automatically_derived]
@@ -80,6 +143,8 @@ pub fn expand_reqwest_client(input: DeriveInput) -> syn::Result<TokenStream> {
                 self.#base_url_field.as_ref()
             }
         }
+
+        #auth_impls
     })
 }
 
@@ -90,6 +155,8 @@ struct FieldMarkers {
     client: bool,
     /// Whether the field stores the service base URL.
     base_url: bool,
+    /// Whether the field stores the generated `{Mod}AuthState`.
+    auth: bool,
 }
 
 /// Parse `#[openapi_trait(...)]` markers from one struct field.
@@ -112,7 +179,14 @@ fn parse_markers(attrs: &[syn::Attribute]) -> syn::Result<FieldMarkers> {
                 return Ok(());
             }
 
-            Err(meta.error("unsupported openapi_trait attribute; expected `client` or `base_url`"))
+            if meta.path.is_ident("auth") {
+                markers.auth = true;
+                return Ok(());
+            }
+
+            Err(meta.error(
+                "unsupported openapi_trait attribute; expected `client`, `base_url`, or `auth`",
+            ))
         })?;
     }
 

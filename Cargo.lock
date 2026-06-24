@@ -666,6 +666,7 @@ name = "openapi-trait"
 version = "0.0.2"
 dependencies = [
  "axum",
+ "base64",
  "openapi-trait-axum",
  "openapi-trait-client",
  "percent-encoding",

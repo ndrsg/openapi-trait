@@ -1,0 +1,106 @@
+openapi: 3.0.1
+info:
+  title: SecurityExample
+  version: 1.0.0
+security:
+  - apiKeyAuth: []
+paths:
+  /me:
+    get:
+      operationId: getMe
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkPayload"
+  /admin:
+    get:
+      operationId: getAdmin
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPayload"
+  /flex:
+    get:
+      operationId: getFlex
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KindPayload"
+  /public:
+    get:
+      operationId: getPublic
+      security: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkPayload"
+  /cookied:
+    get:
+      operationId: getCookied
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionPayload"
+components:
+  schemas:
+    OkPayload:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+    TokenPayload:
+      type: object
+      properties:
+        token:
+          type: string
+      required: [token]
+    KindPayload:
+      type: object
+      properties:
+        kind:
+          type: string
+      required: [kind]
+    SessionPayload:
+      type: object
+      properties:
+        session:
+          type: string
+      required: [session]
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    bearerAuth:
+      type: http
+      scheme: bearer
+    basicAuth:
+      type: http
+      scheme: basic
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
