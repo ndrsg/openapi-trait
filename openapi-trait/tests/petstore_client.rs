@@ -7,7 +7,11 @@ use petstore::PetstoreClient as _;
 
 macro_rules! unreachable_operation {
     ($name:ident, $req:ty, $resp:ty) => {
-        async fn $name(&self, _req: $req) -> Result<$resp, Self::Error> {
+        async fn $name(
+            &self,
+            _req: $req,
+            _options: Option<openapi_trait::RequestOptions>,
+        ) -> Result<$resp, Self::Error> {
             unreachable!()
         }
     };
@@ -108,6 +112,7 @@ impl petstore::PetstoreClient for MockPetstoreClient {
     async fn get_pet_by_id(
         &self,
         req: petstore::GetPetByIdRequest,
+        _options: Option<openapi_trait::RequestOptions>,
     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
         if req.pet_id == 42 {
             Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
@@ -143,7 +148,7 @@ async fn generated_client_trait_uses_generated_types() {
     let client = MockPetstoreClient;
 
     let response = client
-        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 })
+        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 }, None)
         .await
         .unwrap();
 
@@ -161,7 +166,7 @@ async fn generated_client_trait_can_return_non_success_status() {
     let client = MockPetstoreClient;
 
     let response = client
-        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 99 })
+        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 99 }, None)
         .await
         .unwrap();
 

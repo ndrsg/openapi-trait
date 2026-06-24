@@ -146,6 +146,37 @@ struct PetstoreClient {
 }
 ```
 
+### Per-request headers and authentication
+
+Every generated client method takes an `Option<openapi_trait::RequestOptions>`
+argument in addition to the operation request. Use it to attach extra headers or
+authentication to a single call without re-instantiating the client. Pass `None`
+when you have nothing to add:
+
+```rust
+use petstore::PetstoreClient as _;
+
+// No extras:
+client
+    .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 }, None)
+    .await?;
+
+// Bearer auth + a custom header, scoped to this request only:
+client
+    .get_pet_by_id(
+        petstore::GetPetByIdRequest { pet_id: 42 },
+        Some(
+            RequestOptions::new()
+                .bearer_auth("token-123")
+                .header("X-Request-Id", "abc-789"),
+        ),
+    )
+    .await?;
+```
+
+`RequestOptions` also offers `basic_auth(username, password)`. Options are
+applied after the operation's declared headers.
+
 Disable default features if you only want the transport-agnostic trait:
 
 ```toml

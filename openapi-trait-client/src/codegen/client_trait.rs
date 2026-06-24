@@ -40,6 +40,7 @@ fn generate_trait_method(op: &OperationInfo) -> TokenStream {
         fn #method_ident(
             &self,
             req: #req_ident,
+            options: ::core::option::Option<::openapi_trait::RequestOptions>,
         ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send;
     }
 }
