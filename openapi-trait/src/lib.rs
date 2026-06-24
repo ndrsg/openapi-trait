@@ -93,8 +93,15 @@ pub trait ReqwestClientCore {
 /// # }
 /// ```
 ///
-/// Options are applied after the operation's declared headers, so a header set
-/// here is sent in addition to (and after) any same-named operation header.
+/// Extra [`header`]s are applied after the operation's declared headers, so a
+/// header set here is sent in addition to (and after) any same-named operation
+/// header. Authentication set via [`bearer_auth`] or [`basic_auth`], by
+/// contrast, *replaces* the `Authorization` header from a configured security
+/// scheme, so per-request credentials deterministically win.
+///
+/// [`header`]: Self::header
+/// [`bearer_auth`]: Self::bearer_auth
+/// [`basic_auth`]: Self::basic_auth
 #[derive(Debug, Clone, Default)]
 pub struct RequestOptions {
     /// Extra headers, applied in insertion order.
@@ -123,16 +130,26 @@ impl RequestOptions {
     }
 
     /// Attach an `Authorization: Bearer <token>` header to the request.
+    ///
+    /// This replaces any `Authorization` header a configured security scheme
+    /// would otherwise set, so the per-request token always wins. Calling it
+    /// clears any credentials previously set via [`basic_auth`](Self::basic_auth).
     #[must_use]
     pub fn bearer_auth(mut self, token: impl Into<String>) -> Self {
         self.bearer_token = Some(token.into());
+        self.basic_auth = None;
         self
     }
 
     /// Attach `Authorization: Basic` credentials to the request.
+    ///
+    /// This replaces any `Authorization` header a configured security scheme
+    /// would otherwise set, so the per-request credentials always win. Calling
+    /// it clears any token previously set via [`bearer_auth`](Self::bearer_auth).
     #[must_use]
     pub fn basic_auth(mut self, username: impl Into<String>, password: Option<String>) -> Self {
         self.basic_auth = Some((username.into(), password));
+        self.bearer_token = None;
         self
     }
 
@@ -145,14 +162,51 @@ impl RequestOptions {
         for (name, value) in self.headers {
             request = request.header(name.as_str(), value.as_str());
         }
+        // Build the `Authorization` value ourselves and apply it with replace
+        // (rather than append) semantics, so a per-request credential overrides
+        // any `Authorization` header a security scheme already set instead of
+        // sending a duplicate. `bearer_auth`/`basic_auth` keep the two mutually
+        // exclusive, so at most one branch runs.
         if let Some(token) = self.bearer_token {
-            request = request.bearer_auth(token);
-        }
-        if let Some((username, password)) = self.basic_auth {
-            request = request.basic_auth(username, password);
+            match reqwest::header::HeaderValue::try_from(format!("Bearer {token}")) {
+                Ok(mut value) => {
+                    value.set_sensitive(true);
+                    request = replace_authorization(request, value);
+                }
+                // Fall back to reqwest so an invalid token surfaces at send time.
+                Err(_) => request = request.bearer_auth(token),
+            }
+        } else if let Some((username, password)) = self.basic_auth {
+            use base64::Engine as _;
+            let credentials = password.as_ref().map_or_else(
+                || format!("{username}:"),
+                |password| format!("{username}:{password}"),
+            );
+            let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
+            match reqwest::header::HeaderValue::try_from(format!("Basic {encoded}")) {
+                Ok(mut value) => {
+                    value.set_sensitive(true);
+                    request = replace_authorization(request, value);
+                }
+                Err(_) => request = request.basic_auth(username, password),
+            }
         }
         request
     }
+}
+
+/// Set `value` as the request's `Authorization` header, replacing any value an
+/// earlier layer (such as a security scheme) already set rather than appending a
+/// duplicate. Applying a single-entry [`HeaderMap`](reqwest::header::HeaderMap)
+/// via `RequestBuilder::headers` uses reqwest's replace semantics.
+#[cfg(feature = "reqwest-client")]
+fn replace_authorization(
+    request: reqwest::RequestBuilder,
+    value: reqwest::header::HeaderValue,
+) -> reqwest::RequestBuilder {
+    let mut headers = reqwest::header::HeaderMap::with_capacity(1);
+    headers.insert(reqwest::header::AUTHORIZATION, value);
+    request.headers(headers)
 }
 
 /// Sibling of [`ReqwestClientCore`] for clients that carry credentials.

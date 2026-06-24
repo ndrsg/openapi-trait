@@ -218,6 +218,37 @@ async fn client_injects_bearer_token() {
 }
 
 #[tokio::test]
+async fn per_request_bearer_overrides_scheme_credential() {
+    let base = spawn_server().await;
+
+    let client = {
+        use sec_client::SecClientClientAuth as _;
+        DerivedClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base,
+            creds: sec_client::SecClientAuthState::default(),
+        }
+        .with_bearer_auth("scheme-token")
+    };
+
+    // The per-request token must replace the scheme-level `Authorization`
+    // header, not append a second one. If it appended, the server's extractor
+    // would see "scheme-token" (the first header) instead.
+    let resp = client
+        .get_admin(
+            sec_client::GetAdminRequest {},
+            Some(openapi_trait::RequestOptions::new().bearer_auth("override-token")),
+        )
+        .await
+        .unwrap();
+    match resp {
+        sec_client::GetAdminResponse::Status200(body) => {
+            assert_eq!(body.token, "override-token");
+        }
+    }
+}
+
+#[tokio::test]
 async fn client_missing_credential_errors_before_send() {
     let client = DerivedClient {
         http: openapi_trait::reqwest::Client::new(),
