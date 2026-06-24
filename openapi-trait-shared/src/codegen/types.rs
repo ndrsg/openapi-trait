@@ -1,3 +1,4 @@
+use heck::ToPascalCase;
 use openapiv3::{
     AdditionalProperties, IntegerFormat, NumberFormat, ObjectType, ReferenceOr, Schema, SchemaKind,
     StringFormat, Type,
@@ -58,7 +59,7 @@ fn ref_or_to_inner_type_ctx(
 pub fn ref_to_ident(reference: &str) -> TokenStream {
     // "#/components/schemas/Foo" -> Foo
     let name = reference.rsplit('/').next().unwrap_or(reference);
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     quote! { #ident }
 }
 
@@ -125,7 +126,7 @@ fn synthesize_inline_composition(
         |name| {
             let tokens = generate(name, inline_types);
             inline_types.push(tokens);
-            let ident = format_ident!("{}", name);
+            let ident = format_ident!("{}", name.to_pascal_case());
             quote! { #ident }
         },
     )

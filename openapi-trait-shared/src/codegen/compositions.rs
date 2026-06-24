@@ -68,7 +68,7 @@ pub fn generate_all_of(
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&description.cloned());
 
     let mut fields: Vec<TokenStream> = Vec::new();
@@ -140,7 +140,7 @@ fn generate_enum(
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&description.cloned());
 
     let serde_attr = discriminator.map_or_else(

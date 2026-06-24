@@ -43,7 +43,7 @@ fn generate_schema_item(
         ReferenceOr::Item(s) => s,
         ReferenceOr::Reference { reference } => {
             // Unusual: a component schema that is itself a $ref; just emit a type alias.
-            let ident = format_ident!("{}", name);
+            let ident = format_ident!("{}", name.to_pascal_case());
             let target = ref_to_ident(reference);
             return quote! { pub type #ident = #target; };
         }
@@ -78,7 +78,7 @@ fn generate_schema_item(
         }
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
-            let ident = format_ident!("{}", name);
+            let ident = format_ident!("{}", name.to_pascal_case());
             let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), inline_types);
             let doc = doc_attr(&schema.schema_data.description);
             quote! {
@@ -91,7 +91,7 @@ fn generate_schema_item(
 
 /// Generate a string enum type from a schema.
 fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&schema.schema_data.description);
     let variants = string_enum_values(schema)
         .into_iter()
@@ -137,7 +137,7 @@ pub fn generate_object_struct(
     obj: &openapiv3::ObjectType,
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&schema.schema_data.description);
 
     // A pure-map object (no declared properties, only `additionalProperties`)
