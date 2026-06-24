@@ -101,7 +101,7 @@ async fn generated_reqwest_client_handles_path_params() {
     };
 
     let response = client
-        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 })
+        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 }, None)
         .await
         .unwrap();
 
@@ -120,9 +120,12 @@ async fn generated_reqwest_client_handles_query_params() {
     };
 
     let response = client
-        .find_pets_by_status(petstore::FindPetsByStatusRequest {
-            status: petstore::FindPetsByStatusStatusQuery::Available,
-        })
+        .find_pets_by_status(
+            petstore::FindPetsByStatusRequest {
+                status: petstore::FindPetsByStatusStatusQuery::Available,
+            },
+            None,
+        )
         .await
         .unwrap();
 
@@ -141,16 +144,19 @@ async fn generated_reqwest_client_handles_json_bodies() {
     };
 
     let response = client
-        .add_pet(petstore::AddPetRequest {
-            body: petstore::Pet {
-                id: Some(8),
-                name: "from-client".into(),
-                photo_urls: vec![],
-                category: None,
-                tags: None,
-                status: Some("pending".into()),
+        .add_pet(
+            petstore::AddPetRequest {
+                body: petstore::Pet {
+                    id: Some(8),
+                    name: "from-client".into(),
+                    photo_urls: vec![],
+                    category: None,
+                    tags: None,
+                    status: Some("pending".into()),
+                },
             },
-        })
+            None,
+        )
         .await
         .unwrap();
 
@@ -158,4 +164,105 @@ async fn generated_reqwest_client_handles_json_bodies() {
         petstore::AddPetResponse::Status200(pet) => assert_eq!(pet.name, "from-client"),
         _ => panic!("expected 200 response"),
     }
+}
+
+/// Mock server that records the headers received on `get_pet_by_id`, so tests
+/// can assert that per-request [`openapi_trait::RequestOptions`] reach the wire.
+#[derive(Clone, Default)]
+struct RecordingPetstore {
+    received: std::sync::Arc<std::sync::Mutex<Vec<(String, String)>>>,
+}
+
+impl petstore_server::PetstoreServerApi for RecordingPetstore {
+    type Error = petstore_server::NotImplemented;
+
+    async fn get_pet_by_id(
+        &self,
+        req: petstore_server::GetPetByIdRequest,
+        _state: axum::extract::State<()>,
+        headers: axum::http::HeaderMap,
+    ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
+        {
+            let mut received = self.received.lock().unwrap();
+            for (name, value) in &headers {
+                received.push((
+                    name.as_str().to_owned(),
+                    value.to_str().unwrap_or_default().to_owned(),
+                ));
+            }
+        }
+        Ok(petstore_server::GetPetByIdResponse::Status200(
+            petstore_server::Pet {
+                id: Some(req.pet_id),
+                name: "doggie".into(),
+                photo_urls: vec![],
+                category: None,
+                tags: None,
+                status: None,
+            },
+        ))
+    }
+
+    async fn find_pets_by_status(
+        &self,
+        _req: petstore_server::FindPetsByStatusRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<petstore_server::FindPetsByStatusResponse, Self::Error> {
+        Ok(petstore_server::FindPetsByStatusResponse::Status400)
+    }
+
+    async fn add_pet(
+        &self,
+        req: petstore_server::AddPetRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<petstore_server::AddPetResponse, Self::Error> {
+        Ok(petstore_server::AddPetResponse::Status200(req.body))
+    }
+}
+
+#[tokio::test]
+async fn generated_reqwest_client_applies_per_request_headers_and_auth() {
+    let recorder = RecordingPetstore::default();
+    let received = recorder.received.clone();
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        axum::serve(listener, recorder.router().with_state(()))
+            .await
+            .unwrap();
+    });
+
+    let client = DerivedPetstoreClient {
+        http: openapi_trait::reqwest::Client::new(),
+        endpoint: base_url,
+    };
+
+    client
+        .get_pet_by_id(
+            petstore::GetPetByIdRequest { pet_id: 42 },
+            Some(
+                openapi_trait::RequestOptions::new()
+                    .bearer_auth("token-123")
+                    .header("x-request-id", "abc-789"),
+            ),
+        )
+        .await
+        .unwrap();
+
+    let received = received.lock().unwrap().clone();
+    assert!(
+        received
+            .iter()
+            .any(|(name, value)| name == "authorization" && value == "Bearer token-123"),
+        "expected bearer auth header, got {received:?}"
+    );
+    assert!(
+        received
+            .iter()
+            .any(|(name, value)| name == "x-request-id" && value == "abc-789"),
+        "expected custom header, got {received:?}"
+    );
 }

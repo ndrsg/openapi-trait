@@ -126,6 +126,7 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
         fn #method_ident(
             &self,
             req: #req_ident,
+            options: ::core::option::Option<::openapi_trait::RequestOptions>,
         ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
             let client = ::openapi_trait::ReqwestClientCore::reqwest_client(self).clone();
             let base_url = ::openapi_trait::ReqwestClientCore::base_url(self).to_owned();
@@ -142,6 +143,11 @@ fn generate_impl_method(op: &OperationInfo, error_name: &proc_macro2::Ident) -> 
                 #query_builder
                 #header_builder
                 #body_builder
+
+                let request = match options {
+                    ::core::option::Option::Some(options) => options.apply(request),
+                    ::core::option::Option::None => request,
+                };
 
                 let response = request.send().await.map_err(#error_name::Transport)?;
                 let status = response.status();

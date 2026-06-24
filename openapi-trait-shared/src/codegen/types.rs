@@ -1,4 +1,8 @@
-use openapiv3::{IntegerFormat, NumberFormat, ReferenceOr, Schema, SchemaKind, StringFormat, Type};
+use heck::ToPascalCase;
+use openapiv3::{
+    AdditionalProperties, IntegerFormat, NumberFormat, ObjectType, ReferenceOr, Schema, SchemaKind,
+    StringFormat, Type,
+};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -55,7 +59,7 @@ fn ref_or_to_inner_type_ctx(
 pub fn ref_to_ident(reference: &str) -> TokenStream {
     // "#/components/schemas/Foo" -> Foo
     let name = reference.rsplit('/').next().unwrap_or(reference);
-    let ident = format_ident!("{}", name);
+    let ident = format_ident!("{}", name.to_pascal_case());
     quote! { #ident }
 }
 
@@ -67,6 +71,9 @@ fn schema_kind_to_type(
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     match &schema.schema_kind {
+        SchemaKind::Type(Type::Object(obj)) => {
+            object_schema_to_type(schema, obj, parent_name, inline_types)
+        }
         SchemaKind::Type(t) => primitive_type_to_rust(t, parent_name, inline_types),
         SchemaKind::OneOf { one_of } => {
             synthesize_inline_composition(parent_name, inline_types, |name, sink| {
@@ -119,7 +126,7 @@ fn synthesize_inline_composition(
         |name| {
             let tokens = generate(name, inline_types);
             inline_types.push(tokens);
-            let ident = format_ident!("{}", name);
+            let ident = format_ident!("{}", name.to_pascal_case());
             quote! { #ident }
         },
     )
@@ -170,7 +177,61 @@ fn primitive_type_to_rust(
             );
             quote! { ::std::vec::Vec<#item_ty> }
         }
+        // Objects are handled in `schema_kind_to_type`, which has the full
+        // schema (description, synthesis context) available.
         Type::Object(_) => quote! { ::serde_json::Value },
+    }
+}
+
+/// Convert an object schema to a Rust type.
+///
+/// - An object that declares `properties` is synthesized into a named top-level
+///   struct (via [`super::schemas::generate_object_struct`]) when a
+///   `parent_name` is available; the returned token stream references it.
+/// - An object with no declared `properties` but an `additionalProperties`
+///   entry is a map and becomes `HashMap<String, T>`.
+/// - Anything else (e.g. a free-form object with no schema info, or no parent
+///   name to synthesize against) falls back to untyped JSON.
+fn object_schema_to_type(
+    schema: &Schema,
+    obj: &ObjectType,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
+    if !obj.properties.is_empty() {
+        return synthesize_inline_composition(parent_name, inline_types, |name, sink| {
+            super::schemas::generate_object_struct(name, schema, obj, sink)
+        });
+    }
+    if let Some(ap) = &obj.additional_properties {
+        if let Some(value_ty) = additional_properties_value_type(ap, parent_name, inline_types) {
+            return quote! {
+                ::std::collections::HashMap<::std::string::String, #value_ty>
+            };
+        }
+    }
+    quote! { ::serde_json::Value }
+}
+
+/// Resolve an `additionalProperties` declaration to the value type `T` of the
+/// resulting `HashMap<String, T>`.
+///
+/// - `additionalProperties: true` → `serde_json::Value` (any value allowed).
+/// - `additionalProperties: false` → `None` (no extra properties; the caller
+///   should not emit a map).
+/// - `additionalProperties: <schema>` → the mapped type of that schema.
+#[must_use]
+pub fn additional_properties_value_type(
+    ap: &AdditionalProperties,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> Option<TokenStream> {
+    match ap {
+        AdditionalProperties::Any(false) => None,
+        AdditionalProperties::Any(true) => Some(quote! { ::serde_json::Value }),
+        AdditionalProperties::Schema(schema) => {
+            Some(ref_or_to_inner_type_ctx(schema, parent_name, inline_types))
+        }
     }
 }
 

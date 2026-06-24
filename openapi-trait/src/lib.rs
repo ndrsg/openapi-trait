@@ -73,6 +73,87 @@ pub trait ReqwestClientCore {
     fn base_url(&self) -> &str;
 }
 
+/// Per-request transport options applied on top of the operation's own
+/// parameters.
+///
+/// Every generated client method takes a `RequestOptions` argument, letting you
+/// attach extra HTTP headers or authentication to a single request without
+/// re-instantiating the underlying client. Pass [`RequestOptions::default`]
+/// (or [`RequestOptions::new`]) when you have nothing to add.
+///
+/// The builder methods are chainable:
+///
+/// ```rust
+/// # #[cfg(feature = "reqwest-client")] {
+/// let options = openapi_trait::RequestOptions::new()
+///     .bearer_auth("token-123")
+///     .header("X-Request-Id", "abc");
+/// # let _ = options;
+/// # }
+/// ```
+///
+/// Options are applied after the operation's declared headers, so a header set
+/// here is sent in addition to (and after) any same-named operation header.
+#[derive(Debug, Clone, Default)]
+pub struct RequestOptions {
+    /// Extra headers, applied in insertion order.
+    headers: Vec<(String, String)>,
+    /// `Authorization: Bearer <token>` to attach, if any.
+    bearer_token: Option<String>,
+    /// `Authorization: Basic` credentials (username, optional password).
+    basic_auth: Option<(String, Option<String>)>,
+}
+
+impl RequestOptions {
+    /// Create an empty set of request options.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an extra header to the request.
+    ///
+    /// Invalid header names or values are surfaced by reqwest when the request
+    /// is sent, matching `reqwest::RequestBuilder::header` semantics.
+    #[must_use]
+    pub fn header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.push((name.into(), value.into()));
+        self
+    }
+
+    /// Attach an `Authorization: Bearer <token>` header to the request.
+    #[must_use]
+    pub fn bearer_auth(mut self, token: impl Into<String>) -> Self {
+        self.bearer_token = Some(token.into());
+        self
+    }
+
+    /// Attach `Authorization: Basic` credentials to the request.
+    #[must_use]
+    pub fn basic_auth(mut self, username: impl Into<String>, password: Option<String>) -> Self {
+        self.basic_auth = Some((username.into(), password));
+        self
+    }
+
+    /// Apply these options to a reqwest request builder.
+    ///
+    /// Used by the generated reqwest-backed client implementation; you should
+    /// not normally need to call it directly.
+    #[cfg(feature = "reqwest-client")]
+    pub fn apply(self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        for (name, value) in self.headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        if let Some(token) = self.bearer_token {
+            request = request.bearer_auth(token);
+        }
+        if let Some((username, password)) = self.basic_auth {
+            request = request.basic_auth(username, password);
+        }
+        request
+    }
+}
+
 #[cfg(feature = "reqwest-client")]
 pub use percent_encoding;
 #[cfg(feature = "reqwest-client")]
