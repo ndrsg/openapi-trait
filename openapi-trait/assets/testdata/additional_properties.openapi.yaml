@@ -1,0 +1,61 @@
+openapi: 3.0.1
+info:
+  version: 1.0.0
+  title: Example
+paths:
+  /metadata:
+    get:
+      operationId: getMetadata
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringMap'
+components:
+  schemas:
+    # Pure map: no declared properties, typed additionalProperties.
+    StringMap:
+      type: object
+      additionalProperties:
+        type: string
+    # Pure map: additionalProperties: true -> values are arbitrary JSON.
+    AnyMap:
+      type: object
+      additionalProperties: true
+    # Map whose values are a referenced schema.
+    LabelMap:
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/Label'
+    Label:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+    # Declared properties alongside additionalProperties -> struct with a
+    # flattened catch-all field.
+    Config:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+      additionalProperties:
+        type: integer
+        format: int32
+    # Inline object property -> synthesized `EnvelopePayload` struct.
+    Envelope:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: object
+          required: [id]
+          properties:
+            id:
+              type: string
+            note:
+              type: string

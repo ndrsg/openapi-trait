@@ -1,10 +1,13 @@
 use heck::{ToPascalCase, ToSnakeCase};
-use openapiv3::{Components, OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
+use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::compositions::{generate_all_of, generate_any_of, generate_one_of};
-use super::types::{is_string_enum, ref_to_ident, schema_to_rust_type_ctx, string_enum_values};
+use super::types::{
+    additional_properties_value_type, is_string_enum, ref_to_ident, schema_to_rust_type_ctx,
+    string_enum_values,
+};
 
 /// Generate all schema structs and enums from `components/schemas`.
 ///
@@ -21,7 +24,7 @@ pub fn generate_schemas(openapi: &OpenAPI) -> TokenStream {
     let items: Vec<TokenStream> = components
         .schemas
         .iter()
-        .map(|(name, ref_or)| generate_schema_item(name, ref_or, components, &mut inline_types))
+        .map(|(name, ref_or)| generate_schema_item(name, ref_or, &mut inline_types))
         .collect();
 
     quote! {
@@ -34,7 +37,6 @@ pub fn generate_schemas(openapi: &OpenAPI) -> TokenStream {
 fn generate_schema_item(
     name: &str,
     ref_or: &ReferenceOr<Schema>,
-    components: &Components,
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     let schema = match ref_or {
@@ -72,7 +74,7 @@ fn generate_schema_item(
             inline_types,
         ),
         SchemaKind::Type(Type::Object(obj)) => {
-            generate_object_struct(name, schema, obj, components, inline_types)
+            generate_object_struct(name, schema, obj, inline_types)
         }
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
@@ -123,15 +125,34 @@ fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
 }
 
 /// Generate a struct from an object schema.
-fn generate_object_struct(
+///
+/// Declared properties become fields; when the schema also carries an
+/// `additionalProperties` entry, a flattened `HashMap` catch-all field is added.
+/// A schema with no declared properties (a pure map) instead becomes a
+/// `HashMap` type alias.
+#[must_use]
+pub fn generate_object_struct(
     name: &str,
     schema: &Schema,
     obj: &openapiv3::ObjectType,
-    _components: &Components,
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     let ident = format_ident!("{}", name);
     let doc = doc_attr(&schema.schema_data.description);
+
+    // A pure-map object (no declared properties, only `additionalProperties`)
+    // is emitted as a `HashMap` type alias rather than an empty struct.
+    if obj.properties.is_empty() {
+        if let Some(ap) = &obj.additional_properties {
+            if let Some(value_ty) = additional_properties_value_type(ap, Some(name), inline_types) {
+                return quote! {
+                    #doc
+                    pub type #ident =
+                        ::std::collections::HashMap<::std::string::String, #value_ty>;
+                };
+            }
+        }
+    }
 
     let fields: Vec<TokenStream> = obj
         .properties
@@ -148,6 +169,19 @@ fn generate_object_struct(
         })
         .collect();
 
+    // When declared properties coexist with `additionalProperties`, collect the
+    // extra entries into a flattened `HashMap` catch-all field.
+    let additional_field = obj.additional_properties.as_ref().and_then(|ap| {
+        let synth_name = format!("{name}AdditionalProperties");
+        additional_properties_value_type(ap, Some(&synth_name), inline_types).map(|value_ty| {
+            quote! {
+                #[serde(flatten)]
+                pub additional_properties:
+                    ::std::collections::HashMap<::std::string::String, #value_ty>,
+            }
+        })
+    });
+
     quote! {
         #doc
         #[derive(
@@ -159,6 +193,7 @@ fn generate_object_struct(
 
         pub struct #ident {
             #(#fields)*
+            #additional_field
         }
     }
 }
