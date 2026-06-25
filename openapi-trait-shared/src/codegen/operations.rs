@@ -61,24 +61,69 @@ pub enum ResponseStatus {
     Default,
 }
 
+/// Collected codegen diagnostics, separated by severity.
+///
+/// Errors are turned into `compile_error!` tokens (the build fails); warnings
+/// are printed to stderr during macro expansion (the build proceeds). This
+/// keeps unsupported `OpenAPI` constructs from being dropped silently.
+#[derive(Debug, Default)]
+pub struct Diagnostics {
+    /// Fatal problems, emitted as `compile_error!` tokens.
+    pub errors: Vec<String>,
+    /// Non-fatal skips, emitted as `eprintln!` warnings; the build proceeds.
+    pub warnings: Vec<String>,
+}
+
+impl Diagnostics {
+    /// Record a fatal diagnostic.
+    fn error(&mut self, msg: String) {
+        self.errors.push(msg);
+    }
+
+    /// Record a non-fatal diagnostic.
+    fn warn(&mut self, msg: String) {
+        self.warnings.push(msg);
+    }
+
+    /// Print all collected warnings to stderr during macro expansion.
+    pub fn emit_warnings(&self) {
+        for warning in &self.warnings {
+            eprintln!("openapi-trait: warning: {warning}");
+        }
+    }
+}
+
 /// Collect all operations from the `OpenAPI` document.
+///
+/// Returns the operations along with any [`Diagnostics`] gathered while walking
+/// the spec (unsupported constructs, unresolved `$ref`s, missing
+/// `operationId`s).
 #[must_use]
-pub fn collect_operations(openapi: &OpenAPI, schemes: &[SchemeInfo]) -> Vec<OperationInfo> {
+pub fn collect_operations(
+    openapi: &OpenAPI,
+    schemes: &[SchemeInfo],
+) -> (Vec<OperationInfo>, Diagnostics) {
     let mut ops = Vec::new();
+    let mut diag = Diagnostics::default();
     for (path, ref_or_item) in &openapi.paths.paths {
         let item = match ref_or_item {
             ReferenceOr::Item(i) => i,
-            ReferenceOr::Reference { .. } => continue,
+            ReferenceOr::Reference { .. } => {
+                diag.warn(format!(
+                    "path `{path}` is a $ref to a path item, which is not supported; all its operations were skipped"
+                ));
+                continue;
+            }
         };
         for (method, operation) in path_item_operations(item) {
             if let Some(info) =
-                build_operation_info(path, &method, operation, item, openapi, schemes)
+                build_operation_info(path, &method, operation, item, openapi, schemes, &mut diag)
             {
                 ops.push(info);
             }
         }
     }
-    ops
+    (ops, diag)
 }
 
 /// Returns all operations in a path item with their HTTP methods.
@@ -119,8 +164,14 @@ fn build_operation_info(
     path_item: &PathItem,
     openapi: &OpenAPI,
     schemes: &[SchemeInfo],
+    diag: &mut Diagnostics,
 ) -> Option<OperationInfo> {
-    let operation_id = operation.operation_id.clone()?;
+    let Some(operation_id) = operation.operation_id.clone() else {
+        diag.error(format!(
+            "operation `{method} {path}` is missing an `operationId`; one is required to name the generated Rust method"
+        ));
+        return None;
+    };
 
     // Collect parameters: path-level then operation-level (operation wins on name clash)
     let mut all_params: Vec<&ReferenceOr<Parameter>> = Vec::new();
@@ -139,6 +190,9 @@ fn build_operation_info(
                 if let Some(resolved) = resolve_param_ref(reference, openapi) {
                     resolved
                 } else {
+                    diag.warn(format!(
+                        "operation `{operation_id}`: could not resolve parameter $ref `{reference}`; parameter skipped"
+                    ));
                     continue;
                 }
             }
@@ -188,7 +242,10 @@ fn build_operation_info(
             Parameter::Path { .. } => path_params.push(info),
             Parameter::Query { .. } => query_params.push(info),
             Parameter::Header { .. } => header_params.push(info),
-            Parameter::Cookie { .. } => {}
+            Parameter::Cookie { .. } => diag.warn(format!(
+                "operation `{operation_id}`: cookie parameter `{}` is not supported and was skipped",
+                data.name
+            )),
         }
     }
 
@@ -197,7 +254,7 @@ fn build_operation_info(
         .as_ref()
         .and_then(|rb| build_body_info(rb, openapi));
 
-    let responses = build_responses(&operation.responses, openapi);
+    let responses = build_responses(&operation.responses, openapi, &operation_id, diag);
     let auth = resolve_op_security(operation, openapi, schemes);
 
     Some(OperationInfo {
@@ -280,7 +337,12 @@ fn json_media_type_to_rust(
 }
 
 /// Build response info list from an `OpenAPI` responses object.
-fn build_responses(responses: &Responses, openapi: &OpenAPI) -> Vec<ResponseInfo> {
+fn build_responses(
+    responses: &Responses,
+    openapi: &OpenAPI,
+    op_id: &str,
+    diag: &mut Diagnostics,
+) -> Vec<ResponseInfo> {
     let mut out = Vec::new();
 
     for (status_code, ref_or_resp) in &responses.responses {
@@ -290,6 +352,9 @@ fn build_responses(responses: &Responses, openapi: &OpenAPI) -> Vec<ResponseInfo
                 if let Some(r) = resolve_response_ref(reference, openapi) {
                     r
                 } else {
+                    diag.warn(format!(
+                        "operation `{op_id}`: could not resolve response $ref `{reference}`; response skipped"
+                    ));
                     continue;
                 }
             }
@@ -299,7 +364,12 @@ fn build_responses(responses: &Responses, openapi: &OpenAPI) -> Vec<ResponseInfo
 
         let status = match status_code {
             StatusCode::Code(n) => ResponseStatus::Code(*n),
-            StatusCode::Range(_) => continue, // skip range codes
+            StatusCode::Range(n) => {
+                diag.warn(format!(
+                    "operation `{op_id}`: response status range `{n}XX` is not supported and was skipped"
+                ));
+                continue;
+            }
         };
 
         out.push(ResponseInfo {
@@ -317,6 +387,9 @@ fn build_responses(responses: &Responses, openapi: &OpenAPI) -> Vec<ResponseInfo
                 if let Some(r) = resolve_response_ref(reference, openapi) {
                     r
                 } else {
+                    diag.warn(format!(
+                        "operation `{op_id}`: could not resolve default response $ref `{reference}`; default response skipped"
+                    ));
                     return out;
                 }
             }
@@ -337,7 +410,24 @@ fn resolve_response_ref<'a>(reference: &str, openapi: &'a OpenAPI) -> Option<&'a
     openapi.components.as_ref()?.responses.get(name)?.as_item()
 }
 
+/// Emit a `compile_error!` token for each fatal operation diagnostic.
+#[must_use]
+pub fn generate_operation_errors(errors: &[String]) -> TokenStream {
+    if errors.is_empty() {
+        return TokenStream::new();
+    }
+    let msgs: Vec<TokenStream> = errors
+        .iter()
+        .map(|err| {
+            let msg = format!("openapi-trait: {err}");
+            quote! { ::core::compile_error!(#msg); }
+        })
+        .collect();
+    quote! { #(#msgs)* }
+}
+
 /// Generate query-param enum types + request structs + response enums for all operations.
+#[must_use]
 pub fn generate_operation_types(ops: &[OperationInfo]) -> TokenStream {
     let items: Vec<TokenStream> = ops.iter().map(generate_single_operation_types).collect();
     quote! { #(#items)* }
@@ -518,5 +608,99 @@ fn combined_doc(summary: Option<&String>, description: Option<&String>) -> Token
         (Some(s), _) => quote! { #[doc = #s] },
         (None, Some(d)) => quote! { #[doc = #d] },
         (None, None) => quote! {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a spec and collect its operations + diagnostics.
+    fn collect(spec: &str) -> (Vec<OperationInfo>, Diagnostics) {
+        let openapi: OpenAPI = serde_yaml::from_str(spec).expect("spec parses");
+        collect_operations(&openapi, &[])
+    }
+
+    #[test]
+    fn missing_operation_id_is_a_fatal_error_and_drops_the_operation() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert!(ops.is_empty(), "operation without operationId must be dropped");
+        assert!(diag.warnings.is_empty());
+        assert_eq!(diag.errors.len(), 1);
+        assert!(diag.errors[0].contains("missing an `operationId`"));
+        assert!(diag.errors[0].contains("get /pets"));
+    }
+
+    #[test]
+    fn cookie_param_warns_but_keeps_the_operation() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - { name: session, in: cookie, schema: { type: string } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1, "operation must still be generated");
+        assert!(diag.errors.is_empty());
+        assert_eq!(diag.warnings.len(), 1);
+        assert!(diag.warnings[0].contains("cookie parameter `session`"));
+    }
+
+    #[test]
+    fn status_range_warns_but_keeps_the_operation() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      responses:
+        '2XX': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty());
+        assert_eq!(diag.warnings.len(), 1);
+        assert!(diag.warnings[0].contains("status range `2XX`"));
+    }
+
+    #[test]
+    fn specific_status_codes_are_handled_without_diagnostics() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    post:
+      operationId: createPet
+      responses:
+        '201': { description: created }
+        '202': { description: accepted }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].responses.len(), 2, "201 and 202 both generated");
+        assert!(diag.errors.is_empty(), "no errors for a clean operation");
+        assert!(diag.warnings.is_empty(), "no warnings for a clean operation");
     }
 }
