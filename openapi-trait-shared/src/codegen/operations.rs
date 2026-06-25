@@ -1,4 +1,4 @@
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::ToPascalCase;
 use openapiv3::{
     MediaType, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, RequestBody, Response,
     Responses, Schema, StatusCode,
@@ -6,6 +6,7 @@ use openapiv3::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
+use super::idents;
 use super::schemas::doc_attr;
 use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
 use super::types::{is_string_enum, schema_to_rust_type, string_enum_values};
@@ -14,6 +15,9 @@ use super::types::{is_string_enum, schema_to_rust_type, string_enum_values};
 #[derive(Debug)]
 pub struct OperationInfo {
     pub operation_id: String,
+    /// Keyword-safe Rust method identifier derived from `operation_id`
+    /// (snake-cased, raw-escaped for keywords, e.g. `r#type`).
+    pub method_ident: syn::Ident,
     pub method: String,
     pub path: String,
     pub summary: Option<String>,
@@ -29,6 +33,9 @@ pub struct OperationInfo {
 #[derive(Debug)]
 pub struct ParamInfo {
     pub name: String,
+    /// Keyword-safe Rust struct-field identifier derived from `name`
+    /// (snake-cased, raw-escaped for keywords, e.g. `r#type`).
+    pub field_ident: syn::Ident,
     pub description: Option<String>,
     pub required: bool,
     /// The Rust type for this parameter (e.g. `i64`, `String`, or an enum ident).
@@ -173,16 +180,72 @@ fn build_operation_info(
         return None;
     };
 
+    // Validate the operationId yields usable Rust identifiers up front, so that
+    // keyword/invalid names surface a clear diagnostic instead of a downstream
+    // proc-macro panic. Keywords become raw identifiers (`type` -> `r#type`);
+    // truly invalid names drop the operation with an error.
+    let method_ident = match idents::method_ident(&operation_id) {
+        Ok(id) => id,
+        Err(msg) => {
+            diag.error(format!("operation `{method} {path}`: {msg}"));
+            return None;
+        }
+    };
+    if let Err(msg) = idents::validate_type_base(&operation_id) {
+        diag.error(format!("operation `{method} {path}`: {msg}"));
+        return None;
+    }
+
     // Collect parameters: path-level then operation-level (operation wins on name clash)
     let mut all_params: Vec<&ReferenceOr<Parameter>> = Vec::new();
     all_params.extend(path_item.parameters.iter());
     all_params.extend(operation.parameters.iter());
+    let (path_params, query_params, header_params) =
+        collect_params(&all_params, &operation_id, method, path, openapi, diag)?;
 
+    let body = operation
+        .request_body
+        .as_ref()
+        .and_then(|rb| build_body_info(rb, openapi));
+
+    let responses = build_responses(&operation.responses, openapi, &operation_id, diag);
+    let auth = resolve_op_security(operation, openapi, schemes);
+
+    Some(OperationInfo {
+        operation_id,
+        method_ident,
+        method: method.to_owned(),
+        path: path.to_owned(),
+        summary: operation.summary.clone(),
+        description: operation.description.clone(),
+        path_params,
+        query_params,
+        header_params,
+        body,
+        responses,
+        auth,
+    })
+}
+
+/// Collect and classify an operation's parameters into `(path, query, header)`
+/// buckets.
+///
+/// Returns `None` (after recording a fatal diagnostic) when a parameter name
+/// cannot become a valid Rust identifier; cookie params and unresolved `$ref`s
+/// are non-fatal and merely warn.
+fn collect_params(
+    all_params: &[&ReferenceOr<Parameter>],
+    operation_id: &str,
+    method: &str,
+    path: &str,
+    openapi: &OpenAPI,
+    diag: &mut Diagnostics,
+) -> Option<(Vec<ParamInfo>, Vec<ParamInfo>, Vec<ParamInfo>)> {
     let mut path_params = Vec::new();
     let mut query_params = Vec::new();
     let mut header_params = Vec::new();
 
-    for ref_or_param in &all_params {
+    for ref_or_param in all_params {
         let param = match ref_or_param {
             ReferenceOr::Item(p) => p,
             ReferenceOr::Reference { reference } => {
@@ -201,22 +264,36 @@ fn build_operation_info(
         let data = param.parameter_data_ref();
         let param_schema = param_schema(param, openapi);
 
-        let (is_enum, enum_ident, enum_values) = param_schema.as_ref().map_or_else(
-            || (false, None, vec![]),
-            |schema| {
-                if is_string_enum(schema) {
-                    let ident = format_ident!(
-                        "{}{}Query",
-                        operation_id.to_pascal_case(),
-                        data.name.to_pascal_case()
-                    );
-                    let vals = string_enum_values(schema);
-                    (true, Some(ident), vals)
-                } else {
-                    (false, None, vec![])
-                }
-            },
-        );
+        // Keyword-safe field identifier for this parameter (shared by the request
+        // struct and every transport that constructs it).
+        let field_ident = match idents::field_ident(&data.name) {
+            Ok(id) => id,
+            Err(msg) => {
+                diag.error(format!("operation `{method} {path}`: {msg}"));
+                return None;
+            }
+        };
+
+        let (is_enum, enum_ident, enum_values) =
+            if param_schema.as_ref().is_some_and(is_string_enum) {
+                let schema = param_schema.as_ref().expect("checked is_some_and above");
+                let name = format!(
+                    "{}{}Query",
+                    operation_id.to_pascal_case(),
+                    data.name.to_pascal_case()
+                );
+                let ident = match idents::type_ident(&name, operation_id) {
+                    Ok(id) => id,
+                    Err(msg) => {
+                        diag.error(format!("operation `{method} {path}`: {msg}"));
+                        return None;
+                    }
+                };
+                let vals = string_enum_values(schema);
+                (true, Some(ident), vals)
+            } else {
+                (false, None, vec![])
+            };
 
         let rust_type = if is_enum {
             let ei = enum_ident.as_ref().unwrap();
@@ -230,6 +307,7 @@ fn build_operation_info(
 
         let info = ParamInfo {
             name: data.name.clone(),
+            field_ident,
             description: data.description.clone(),
             required: data.required,
             rust_type,
@@ -249,27 +327,7 @@ fn build_operation_info(
         }
     }
 
-    let body = operation
-        .request_body
-        .as_ref()
-        .and_then(|rb| build_body_info(rb, openapi));
-
-    let responses = build_responses(&operation.responses, openapi, &operation_id, diag);
-    let auth = resolve_op_security(operation, openapi, schemes);
-
-    Some(OperationInfo {
-        operation_id,
-        method: method.to_owned(),
-        path: path.to_owned(),
-        summary: operation.summary.clone(),
-        description: operation.description.clone(),
-        path_params,
-        query_params,
-        header_params,
-        body,
-        responses,
-        auth,
-    })
+    Some((path_params, query_params, header_params))
 }
 
 /// Resolve a `$ref` to a parameter from the components section.
@@ -497,7 +555,7 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
     let mut fields: Vec<TokenStream> = Vec::new();
 
     for p in &op.path_params {
-        let field_ident = format_ident!("{}", p.name.to_snake_case());
+        let field_ident = &p.field_ident;
         let ftype = &p.rust_type;
         let fdoc = doc_attr(&p.description);
         fields.push(quote! {
@@ -507,7 +565,7 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
     }
 
     for p in &op.query_params {
-        let field_ident = format_ident!("{}", p.name.to_snake_case());
+        let field_ident = &p.field_ident;
         let inner = &p.rust_type;
         let ftype = if p.required {
             quote! { #inner }
@@ -522,7 +580,7 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
     }
 
     for p in &op.header_params {
-        let field_ident = format_ident!("{}", p.name.to_snake_case());
+        let field_ident = &p.field_ident;
         let fdoc = doc_attr(&p.description);
         // Header params are always Option<String> since extraction from HeaderMap can fail
         fields.push(quote! {
@@ -634,7 +692,10 @@ paths:
         '200': { description: ok }
 "#,
         );
-        assert!(ops.is_empty(), "operation without operationId must be dropped");
+        assert!(
+            ops.is_empty(),
+            "operation without operationId must be dropped"
+        );
         assert!(diag.warnings.is_empty());
         assert_eq!(diag.errors.len(), 1);
         assert!(diag.errors[0].contains("missing an `operationId`"));
@@ -684,6 +745,129 @@ paths:
     }
 
     #[test]
+    fn keyword_operation_id_becomes_a_raw_method_ident() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /things:
+    get:
+      operationId: type
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1, "keyword operationId must still generate");
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        assert_eq!(ops[0].method_ident.to_string(), "r#type");
+    }
+
+    #[test]
+    fn hyphenated_operation_id_is_snake_cased() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: list-pets
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty());
+        assert_eq!(ops[0].method_ident.to_string(), "list_pets");
+    }
+
+    #[test]
+    fn operation_id_with_leading_digit_is_a_fatal_error() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: 1pet
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert!(ops.is_empty(), "invalid operationId must be dropped");
+        assert_eq!(diag.errors.len(), 1);
+        assert!(diag.errors[0].contains("1pet"), "{:?}", diag.errors);
+    }
+
+    #[test]
+    fn non_raw_keyword_operation_id_is_a_fatal_error() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /me:
+    get:
+      operationId: self
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert!(ops.is_empty());
+        assert_eq!(diag.errors.len(), 1);
+        assert!(
+            diag.errors[0].contains("reserved Rust keyword"),
+            "{:?}",
+            diag.errors
+        );
+    }
+
+    #[test]
+    fn keyword_parameter_becomes_a_raw_field_ident() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - { name: type, in: query, schema: { type: string } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        assert_eq!(ops[0].query_params.len(), 1);
+        assert_eq!(ops[0].query_params[0].field_ident.to_string(), "r#type");
+    }
+
+    #[test]
+    fn parameter_with_leading_digit_is_a_fatal_error() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - { name: 1abc, in: query, schema: { type: string } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert!(ops.is_empty(), "invalid parameter name must drop the op");
+        assert_eq!(diag.errors.len(), 1);
+        assert!(diag.errors[0].contains("1abc"), "{:?}", diag.errors);
+    }
+
+    #[test]
     fn specific_status_codes_are_handled_without_diagnostics() {
         let (ops, diag) = collect(
             r#"
@@ -701,6 +885,9 @@ paths:
         assert_eq!(ops.len(), 1);
         assert_eq!(ops[0].responses.len(), 2, "201 and 202 both generated");
         assert!(diag.errors.is_empty(), "no errors for a clean operation");
-        assert!(diag.warnings.is_empty(), "no warnings for a clean operation");
+        assert!(
+            diag.warnings.is_empty(),
+            "no warnings for a clean operation"
+        );
     }
 }

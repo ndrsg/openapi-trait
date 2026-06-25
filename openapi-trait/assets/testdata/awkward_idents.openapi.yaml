@@ -1,0 +1,23 @@
+# Hand-written fixture for ANALYSIS.md #2: operationIds and parameter names that
+# collide with Rust keywords or need normalisation. The codegen must emit
+# keyword-safe (raw) identifiers instead of panicking.
+openapi: 3.0.1
+info:
+  title: awkward
+  version: 0.0.1
+paths:
+  /things:
+    get:
+      # `type` is a Rust keyword -> method must be `r#type`, type `TypeRequest`.
+      operationId: type
+      parameters:
+        # `type` is a keyword -> struct field must be `r#type`.
+        - { name: type, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: ok }
+  /pets:
+    get:
+      # Hyphenated id -> snake-cased method `list_pets`.
+      operationId: list-pets
+      responses:
+        '200': { description: ok }

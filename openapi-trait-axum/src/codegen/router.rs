@@ -173,7 +173,7 @@ fn status_code_ident(n: u16) -> proc_macro2::Ident {
 
 /// Generate the query-params struct and route call for one operation.
 fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, TokenStream) {
-    let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
+    let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let path = &op.path;
     let routing_method = format_ident!("{}", op.method);
@@ -199,7 +199,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
         .header_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
+            let field_ident = &p.field_ident;
             let header_name = &p.name;
             quote! {
                 #field_ident: headers
@@ -377,10 +377,8 @@ fn build_path_extractor(params: &[ParamInfo]) -> (Option<TokenStream>, Vec<Token
         .iter()
         .map(|p| format_ident!("path_{}", p.name.to_snake_case()))
         .collect();
-    let field_idents: Vec<proc_macro2::Ident> = params
-        .iter()
-        .map(|p| format_ident!("{}", p.name.to_snake_case()))
-        .collect();
+    let field_idents: Vec<proc_macro2::Ident> =
+        params.iter().map(|p| p.field_ident.clone()).collect();
 
     let extractor = if params.len() == 1 {
         let v = &var_idents[0];
@@ -422,8 +420,8 @@ fn build_query_extractor(
         .query_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
-            let rename_attr = if field_ident == p.name.as_str() {
+            let field_ident = &p.field_ident;
+            let rename_attr = if *field_ident == p.name.as_str() {
                 quote! {}
             } else {
                 let n = &p.name;
@@ -468,7 +466,7 @@ fn build_query_extractor(
         .query_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
+            let field_ident = &p.field_ident;
             quote! { #field_ident: query_params.#field_ident, }
         })
         .collect();

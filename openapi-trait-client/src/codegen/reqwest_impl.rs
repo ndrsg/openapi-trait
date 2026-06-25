@@ -1,4 +1,4 @@
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::ToPascalCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -231,7 +231,7 @@ fn generate_impl_method(
     schemes: &[SchemeInfo],
     has_auth: bool,
 ) -> TokenStream {
-    let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
+    let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
     let http_method = format_ident!("{}", op.method);
@@ -243,7 +243,7 @@ fn generate_impl_method(
         .iter()
         .chain(op.query_params.iter())
         .chain(op.header_params.iter())
-        .map(|param| format_ident!("{}", param.name.to_snake_case()))
+        .map(|param| param.field_ident.clone())
         .chain(op.body.iter().map(|_| format_ident!("body")))
         .collect();
 
@@ -251,7 +251,7 @@ fn generate_impl_method(
         .path_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             let placeholder = format!("{{{}}}", param.name);
             quote! {
                 path = path.replace(#placeholder, &encode_path_param(&#field_ident));
@@ -515,7 +515,7 @@ fn generate_query_struct(op: &OperationInfo) -> TokenStream {
 
 /// Generate one field for the reqwest query helper struct.
 fn generate_query_struct_field(param: &ParamInfo) -> TokenStream {
-    let field_ident = format_ident!("{}", param.name.to_snake_case());
+    let field_ident = &param.field_ident;
     let ty = &param.rust_type;
     let field_type = if param.required {
         quote! { &'a #ty }
@@ -547,7 +547,7 @@ fn generate_query_builder(op: &OperationInfo) -> TokenStream {
         .query_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             quote! { #field_ident: &#field_ident, }
         })
         .collect();
@@ -568,7 +568,7 @@ fn generate_header_builder(
         .header_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             let header_name = &param.name;
 
             if param.required {

@@ -714,6 +714,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
+ "serde_yaml",
  "syn",
 ]
 
