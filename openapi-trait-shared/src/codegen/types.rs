@@ -1,7 +1,7 @@
 use heck::ToPascalCase;
 use openapiv3::{
     AdditionalProperties, IntegerFormat, NumberFormat, ObjectType, ReferenceOr, Schema, SchemaKind,
-    StringFormat, Type,
+    StringFormat, StringType, Type, VariantOrUnknownOrEmpty,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -153,22 +153,7 @@ fn primitive_type_to_rust(
                 quote! { f64 }
             }
         }
-        Type::String(s) => {
-            // For string enums, the caller handles the dedicated enum type;
-            // here we just return String as a fallback.
-            if s.enumeration.is_empty() {
-                if matches!(
-                    &s.format,
-                    openapiv3::VariantOrUnknownOrEmpty::Item(StringFormat::Binary)
-                ) {
-                    quote! { ::std::vec::Vec<u8> }
-                } else {
-                    quote! { ::std::string::String }
-                }
-            } else {
-                quote! { ::std::string::String }
-            }
-        }
+        Type::String(s) => string_type_to_rust(s),
         Type::Boolean(_) => quote! { bool },
         Type::Array(a) => {
             let item_ty = a.items.as_ref().map_or_else(
@@ -180,6 +165,37 @@ fn primitive_type_to_rust(
         // Objects are handled in `schema_kind_to_type`, which has the full
         // schema (description, synthesis context) available.
         Type::Object(_) => quote! { ::serde_json::Value },
+    }
+}
+
+/// Map a string schema to its Rust type, specializing known `format` values.
+///
+/// `date-time`/`date`/`uuid` map to typed `chrono`/`uuid` types (re-exported
+/// through the facade so generated code can reference them as
+/// `::openapi_trait::…`); `binary` maps to `Vec<u8>`. Every other format —
+/// including `email` and unknown formats — falls back to `String`.
+///
+/// Note that `openapiv3::StringFormat` only models `Date`/`DateTime`/`Binary`/
+/// `Byte`/`Password`; `uuid` (and other non-standard formats) arrive as
+/// `VariantOrUnknownOrEmpty::Unknown`.
+fn string_type_to_rust(s: &StringType) -> TokenStream {
+    // String enums are handled by the caller via a dedicated enum type; here we
+    // only emit the scalar fallback.
+    if !s.enumeration.is_empty() {
+        return quote! { ::std::string::String };
+    }
+    match &s.format {
+        VariantOrUnknownOrEmpty::Item(StringFormat::Binary) => quote! { ::std::vec::Vec<u8> },
+        VariantOrUnknownOrEmpty::Item(StringFormat::DateTime) => {
+            quote! { ::openapi_trait::chrono::DateTime<::openapi_trait::chrono::Utc> }
+        }
+        VariantOrUnknownOrEmpty::Item(StringFormat::Date) => {
+            quote! { ::openapi_trait::chrono::NaiveDate }
+        }
+        VariantOrUnknownOrEmpty::Unknown(name) if name == "uuid" => {
+            quote! { ::openapi_trait::uuid::Uuid }
+        }
+        _ => quote! { ::std::string::String },
     }
 }
 
@@ -252,5 +268,80 @@ pub fn string_enum_values(schema: &Schema) -> Vec<String> {
         s.enumeration.iter().filter_map(Clone::clone).collect()
     } else {
         vec![]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a `StringType` with the given `format`, treating `None` as no
+    /// format and a known marker for the unknown variants.
+    fn string_with_format(format: VariantOrUnknownOrEmpty<StringFormat>) -> StringType {
+        StringType {
+            format,
+            ..Default::default()
+        }
+    }
+
+    fn emitted(s: &StringType) -> String {
+        string_type_to_rust(s).to_string()
+    }
+
+    #[test]
+    fn date_time_maps_to_chrono_datetime() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Item(StringFormat::DateTime));
+        assert_eq!(
+            emitted(&s),
+            quote! { ::openapi_trait::chrono::DateTime<::openapi_trait::chrono::Utc> }.to_string()
+        );
+    }
+
+    #[test]
+    fn date_maps_to_chrono_naive_date() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Item(StringFormat::Date));
+        assert_eq!(
+            emitted(&s),
+            quote! { ::openapi_trait::chrono::NaiveDate }.to_string()
+        );
+    }
+
+    #[test]
+    fn uuid_unknown_format_maps_to_uuid() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Unknown("uuid".to_string()));
+        assert_eq!(
+            emitted(&s),
+            quote! { ::openapi_trait::uuid::Uuid }.to_string()
+        );
+    }
+
+    #[test]
+    fn binary_still_maps_to_byte_vec() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Item(StringFormat::Binary));
+        assert_eq!(emitted(&s), quote! { ::std::vec::Vec<u8> }.to_string());
+    }
+
+    #[test]
+    fn email_unknown_format_stays_string() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Unknown("email".to_string()));
+        assert_eq!(emitted(&s), quote! { ::std::string::String }.to_string());
+    }
+
+    #[test]
+    fn no_format_stays_string() {
+        let s = string_with_format(VariantOrUnknownOrEmpty::Empty);
+        assert_eq!(emitted(&s), quote! { ::std::string::String }.to_string());
+    }
+
+    #[test]
+    fn string_enum_stays_string_even_with_format() {
+        // Enums are emitted as dedicated enum types by the caller; the scalar
+        // mapping must not specialize them on `format`.
+        let s = StringType {
+            format: VariantOrUnknownOrEmpty::Unknown("uuid".to_string()),
+            enumeration: vec![Some("a".to_string()), Some("b".to_string())],
+            ..Default::default()
+        };
+        assert_eq!(emitted(&s), quote! { ::std::string::String }.to_string());
     }
 }

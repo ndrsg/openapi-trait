@@ -214,7 +214,7 @@ pub fn object_field_tokens(
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     let snake = prop_name.to_snake_case();
-    let field_ident = keyword_safe_ident(&snake);
+    let field_ident = super::idents::keyword_safe_ident(&snake);
     let rename_attr = {
         let n = prop_name;
         quote! { #[serde(rename = #n)] }
@@ -233,23 +233,6 @@ pub fn object_field_tokens(
         #field_doc
         #rename_attr
         pub #field_ident: #field_type,
-    }
-}
-
-/// Turn a `snake_case` name into a keyword-safe `syn::Ident`, using raw identifier
-/// syntax (`r#type`) when the name clashes with a Rust keyword.
-fn keyword_safe_ident(name: &str) -> proc_macro2::Ident {
-    // Keywords that are valid raw identifiers but not plain identifiers:
-    const KEYWORDS: &[&str] = &[
-        "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
-        "extern", "false", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move",
-        "mut", "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait",
-        "true", "type", "union", "unsafe", "use", "where", "while", "yield",
-    ];
-    if KEYWORDS.contains(&name) {
-        proc_macro2::Ident::new_raw(name, proc_macro2::Span::call_site())
-    } else {
-        format_ident!("{}", name)
     }
 }
 

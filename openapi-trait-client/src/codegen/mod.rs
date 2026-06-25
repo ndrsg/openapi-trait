@@ -8,7 +8,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use openapi_trait_shared::codegen::{
-    operations::{collect_operations, generate_operation_types},
+    operations::{collect_operations, generate_operation_errors, generate_operation_types},
     schemas::generate_schemas,
     security::{
         collect_schemes, generate_op_auth_enum, generate_scheme_types, resolve_alternatives,
@@ -25,7 +25,9 @@ pub fn generate_client(
 ) -> TokenStream {
     let auth_schemes = collect_schemes(openapi);
     let schema_types = generate_schemas(openapi);
-    let ops = collect_operations(openapi, &auth_schemes);
+    let (ops, diagnostics) = collect_operations(openapi, &auth_schemes);
+    diagnostics.emit_warnings();
+    let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(&ops);
 
     let auth_types = generate_scheme_types(&auth_schemes);
@@ -52,6 +54,7 @@ pub fn generate_client(
 
     quote! {
         use super::*;
+        #op_errors
         #unsupported_and
         #schema_types
         #auth_types

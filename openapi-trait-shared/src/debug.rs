@@ -36,8 +36,10 @@ pub fn write_debug_output(mod_ident: &syn::Ident, expanded: &proc_macro2::TokenS
 
     let path = dir.join(format!("{mod_ident}.rs"));
 
-    let formatted = syn::parse2::<syn::File>(expanded.clone())
-        .map_or_else(|_| expanded.to_string(), |file| prettyplease::unparse(&file));
+    let formatted = syn::parse2::<syn::File>(expanded.clone()).map_or_else(
+        |_| expanded.to_string(),
+        |file| prettyplease::unparse(&file),
+    );
 
     match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, formatted)) {
         Ok(()) => eprintln!("openapi-trait: wrote debug output to {}", path.display()),

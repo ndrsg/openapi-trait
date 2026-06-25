@@ -1,4 +1,4 @@
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::ToPascalCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -77,10 +77,6 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
         #[derive(::core::fmt::Debug)]
         pub enum #error_name {
             Transport(::openapi_trait::reqwest::Error),
-            MissingRequiredHeader {
-                operation: &'static str,
-                header: &'static str,
-            },
             MissingCredential {
                 operation: &'static str,
                 scheme: &'static str,
@@ -96,9 +92,6 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
             fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
                     Self::Transport(error) => write!(formatter, "reqwest transport error: {error}"),
-                    Self::MissingRequiredHeader { operation, header } => {
-                        write!(formatter, "missing required header `{header}` for `{operation}`")
-                    }
                     Self::MissingCredential { operation, scheme } => {
                         write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
                     }
@@ -114,8 +107,7 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
             fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
                 match self {
                     Self::Transport(error) => ::core::option::Option::Some(error),
-                    Self::MissingRequiredHeader { .. }
-                    | Self::MissingCredential { .. }
+                    Self::MissingCredential { .. }
                     | Self::UnexpectedStatus { .. } => ::core::option::Option::None,
                 }
             }
@@ -231,7 +223,7 @@ fn generate_impl_method(
     schemes: &[SchemeInfo],
     has_auth: bool,
 ) -> TokenStream {
-    let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
+    let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
     let http_method = format_ident!("{}", op.method);
@@ -243,7 +235,7 @@ fn generate_impl_method(
         .iter()
         .chain(op.query_params.iter())
         .chain(op.header_params.iter())
-        .map(|param| format_ident!("{}", param.name.to_snake_case()))
+        .map(|param| param.field_ident.clone())
         .chain(op.body.iter().map(|_| format_ident!("body")))
         .collect();
 
@@ -251,7 +243,7 @@ fn generate_impl_method(
         .path_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             let placeholder = format!("{{{}}}", param.name);
             quote! {
                 path = path.replace(#placeholder, &encode_path_param(&#field_ident));
@@ -261,7 +253,7 @@ fn generate_impl_method(
 
     let query_struct = generate_query_struct(op);
     let query_builder = generate_query_builder(op);
-    let header_builder = generate_header_builder(op, error_name, operation_name);
+    let header_builder = generate_header_builder(op);
     let body_builder = generate_body_builder(op);
     let (response_arms, fallback) =
         generate_response_match(op, error_name, &resp_ident, operation_name);
@@ -515,7 +507,7 @@ fn generate_query_struct(op: &OperationInfo) -> TokenStream {
 
 /// Generate one field for the reqwest query helper struct.
 fn generate_query_struct_field(param: &ParamInfo) -> TokenStream {
-    let field_ident = format_ident!("{}", param.name.to_snake_case());
+    let field_ident = &param.field_ident;
     let ty = &param.rust_type;
     let field_type = if param.required {
         quote! { &'a #ty }
@@ -547,7 +539,7 @@ fn generate_query_builder(op: &OperationInfo) -> TokenStream {
         .query_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             quote! { #field_ident: &#field_ident, }
         })
         .collect();
@@ -559,29 +551,18 @@ fn generate_query_builder(op: &OperationInfo) -> TokenStream {
 }
 
 /// Generate the reqwest header population code for an operation.
-fn generate_header_builder(
-    op: &OperationInfo,
-    error_name: &proc_macro2::Ident,
-    operation_name: &str,
-) -> TokenStream {
+fn generate_header_builder(op: &OperationInfo) -> TokenStream {
     let header_updates: Vec<TokenStream> = op
         .header_params
         .iter()
         .map(|param| {
-            let field_ident = format_ident!("{}", param.name.to_snake_case());
+            let field_ident = &param.field_ident;
             let header_name = &param.name;
 
             if param.required {
+                // Required headers are non-optional `String`s on the request
+                // struct, so they can be set unconditionally.
                 quote! {
-                    let #field_ident = match #field_ident {
-                        ::core::option::Option::Some(value) => value,
-                        ::core::option::Option::None => {
-                            return ::core::result::Result::Err(#error_name::MissingRequiredHeader {
-                                operation: #operation_name,
-                                header: #header_name,
-                            });
-                        }
-                    };
                     request = request.header(#header_name, #field_ident);
                 }
             } else {

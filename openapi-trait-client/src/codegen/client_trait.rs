@@ -1,4 +1,4 @@
-use heck::{ToPascalCase, ToSnakeCase};
+use heck::ToPascalCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -22,7 +22,7 @@ pub fn generate_trait(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> TokenStr
 
 /// Generate a single trait method for one operation.
 fn generate_trait_method(op: &OperationInfo) -> TokenStream {
-    let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
+    let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
 

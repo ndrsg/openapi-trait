@@ -1,4 +1,5 @@
 pub mod compositions;
+pub mod idents;
 pub mod operations;
 pub mod schemas;
 pub mod security;

@@ -173,7 +173,7 @@ fn status_code_ident(n: u16) -> proc_macro2::Ident {
 
 /// Generate the query-params struct and route call for one operation.
 fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, TokenStream) {
-    let method_ident = format_ident!("{}", op.operation_id.to_snake_case());
+    let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let path = &op.path;
     let routing_method = format_ident!("{}", op.method);
@@ -194,18 +194,37 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
     let (query_struct, query_extractor, query_fields) = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
-    // Extract spec-defined header params from the HeaderMap
+    // Extract spec-defined header params from the HeaderMap. Required headers are
+    // bound up front so a missing one returns 400 before the handler is called;
+    // optional headers map straight into the request struct as `Option<String>`.
+    let mut header_stmts: Vec<TokenStream> = Vec::new();
     let header_fields: Vec<TokenStream> = op
         .header_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
+            let field_ident = &p.field_ident;
             let header_name = &p.name;
-            quote! {
-                #field_ident: headers
-                    .get(#header_name)
-                    .and_then(|v| v.to_str().ok())
-                    .map(::std::string::String::from),
+            if p.required {
+                header_stmts.push(quote! {
+                    let #field_ident = match headers
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        ::core::option::Option::Some(v) => ::std::string::String::from(v),
+                        ::core::option::Option::None => {
+                            let msg = ::std::format!("missing required header `{}`", #header_name);
+                            return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+                        }
+                    };
+                });
+                quote! { #field_ident, }
+            } else {
+                quote! {
+                    #field_ident: headers
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(::std::string::String::from),
+                }
             }
         })
         .collect();
@@ -241,6 +260,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
                 async move {
                     use ::axum::response::IntoResponse as _;
                     #auth_extract
+                    #(#header_stmts)*
                     let req = #req_ident { #(#req_fields)* };
                     match __api.#method_ident(req, #auth_call_arg state, headers).await {
                         ::core::result::Result::Ok(r)  => r.into_response(),
@@ -377,10 +397,8 @@ fn build_path_extractor(params: &[ParamInfo]) -> (Option<TokenStream>, Vec<Token
         .iter()
         .map(|p| format_ident!("path_{}", p.name.to_snake_case()))
         .collect();
-    let field_idents: Vec<proc_macro2::Ident> = params
-        .iter()
-        .map(|p| format_ident!("{}", p.name.to_snake_case()))
-        .collect();
+    let field_idents: Vec<proc_macro2::Ident> =
+        params.iter().map(|p| p.field_ident.clone()).collect();
 
     let extractor = if params.len() == 1 {
         let v = &var_idents[0];
@@ -422,8 +440,8 @@ fn build_query_extractor(
         .query_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
-            let rename_attr = if field_ident == p.name.as_str() {
+            let field_ident = &p.field_ident;
+            let rename_attr = if *field_ident == p.name.as_str() {
                 quote! {}
             } else {
                 let n = &p.name;
@@ -468,7 +486,7 @@ fn build_query_extractor(
         .query_params
         .iter()
         .map(|p| {
-            let field_ident = format_ident!("{}", p.name.to_snake_case());
+            let field_ident = &p.field_ident;
             quote! { #field_ident: query_params.#field_ident, }
         })
         .collect();
