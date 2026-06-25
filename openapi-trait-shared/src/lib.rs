@@ -6,3 +6,4 @@
 #![allow(missing_docs)]
 
 pub mod codegen;
+pub mod debug;
