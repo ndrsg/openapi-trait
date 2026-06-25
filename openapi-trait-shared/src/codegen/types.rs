@@ -71,6 +71,9 @@ fn schema_kind_to_type(
     inline_types: &mut Vec<TokenStream>,
 ) -> TokenStream {
     match &schema.schema_kind {
+        SchemaKind::Type(Type::String(_)) if is_string_enum(schema) => {
+            synthesize_inline_string_enum(schema, parent_name, inline_types)
+        }
         SchemaKind::Type(Type::Object(obj)) => {
             object_schema_to_type(schema, obj, parent_name, inline_types)
         }
@@ -111,6 +114,24 @@ fn schema_kind_to_type(
             quote! { ::serde_json::Value }
         }
     }
+}
+
+/// Generate a named enum for an inline string enum when a parent name is
+/// available; otherwise fall back to `String`.
+fn synthesize_inline_string_enum(
+    schema: &Schema,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+) -> TokenStream {
+    parent_name.map_or_else(
+        || quote! { ::std::string::String },
+        |name| {
+            let tokens = super::schemas::generate_string_enum(name, schema);
+            inline_types.push(tokens);
+            let ident = format_ident!("{}", name.to_pascal_case());
+            quote! { #ident }
+        },
+    )
 }
 
 /// Either synthesize a top-level composition type (when a parent name is

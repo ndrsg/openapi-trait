@@ -90,7 +90,7 @@ fn generate_schema_item(
 }
 
 /// Generate a string enum type from a schema.
-fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
+pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
     let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&schema.schema_data.description);
     let variants = string_enum_values(schema)

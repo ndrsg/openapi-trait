@@ -41,7 +41,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
                     photo_urls: vec!["https://example.com/photo.jpg".into()],
                     category: None,
                     tags: None,
-                    status: Some("available".into()),
+                    status: Some(petstore_server::PetStatus::Available),
                 },
             ))
         } else {
@@ -64,7 +64,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
                         photo_urls: vec![],
                         category: None,
                         tags: None,
-                        status: Some("available".into()),
+                        status: Some(petstore_server::PetStatus::Available),
                     },
                 ]))
             }
@@ -170,7 +170,7 @@ async fn generated_reqwest_client_handles_json_bodies() {
                     photo_urls: vec![],
                     category: None,
                     tags: None,
-                    status: Some("pending".into()),
+                    status: Some(petstore::PetStatus::Pending),
                 },
             },
             None,
