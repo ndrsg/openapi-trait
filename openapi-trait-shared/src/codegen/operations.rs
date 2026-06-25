@@ -582,10 +582,17 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
     for p in &op.header_params {
         let field_ident = &p.field_ident;
         let fdoc = doc_attr(&p.description);
-        // Header params are always Option<String> since extraction from HeaderMap can fail
+        // Header values arrive as strings over the wire. A required header is a
+        // plain `String` so the type system guarantees it is present; an optional
+        // one is `Option<String>` since extraction from a `HeaderMap` can fail.
+        let ftype = if p.required {
+            quote! { ::std::string::String }
+        } else {
+            quote! { ::core::option::Option<::std::string::String> }
+        };
         fields.push(quote! {
             #fdoc
-            pub #field_ident: ::core::option::Option<::std::string::String>,
+            pub #field_ident: #ftype,
         });
     }
 
@@ -865,6 +872,41 @@ paths:
         assert!(ops.is_empty(), "invalid parameter name must drop the op");
         assert_eq!(diag.errors.len(), 1);
         assert!(diag.errors[0].contains("1abc"), "{:?}", diag.errors);
+    }
+
+    #[test]
+    fn required_header_is_non_optional_string_optional_one_is_option() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      parameters:
+        - { name: X-Required, in: header, required: true, schema: { type: string } }
+        - { name: X-Optional, in: header, schema: { type: string } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        assert_eq!(ops[0].header_params.len(), 2);
+
+        let struct_src = generate_request_struct(&ops[0]).to_string();
+        // The required header is a plain `String`; the optional one is wrapped in
+        // `Option`. Normalize whitespace so the token spacing doesn't matter.
+        let normalized: String = struct_src.split_whitespace().collect();
+        assert!(
+            normalized.contains("x_required:::std::string::String,"),
+            "required header must be a non-optional String: {struct_src}"
+        );
+        assert!(
+            normalized.contains("x_optional:::core::option::Option<::std::string::String>"),
+            "optional header must stay an Option: {struct_src}"
+        );
     }
 
     #[test]

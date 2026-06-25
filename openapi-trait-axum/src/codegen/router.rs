@@ -194,18 +194,37 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
     let (query_struct, query_extractor, query_fields) = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
-    // Extract spec-defined header params from the HeaderMap
+    // Extract spec-defined header params from the HeaderMap. Required headers are
+    // bound up front so a missing one returns 400 before the handler is called;
+    // optional headers map straight into the request struct as `Option<String>`.
+    let mut header_stmts: Vec<TokenStream> = Vec::new();
     let header_fields: Vec<TokenStream> = op
         .header_params
         .iter()
         .map(|p| {
             let field_ident = &p.field_ident;
             let header_name = &p.name;
-            quote! {
-                #field_ident: headers
-                    .get(#header_name)
-                    .and_then(|v| v.to_str().ok())
-                    .map(::std::string::String::from),
+            if p.required {
+                header_stmts.push(quote! {
+                    let #field_ident = match headers
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        ::core::option::Option::Some(v) => ::std::string::String::from(v),
+                        ::core::option::Option::None => {
+                            let msg = ::std::format!("missing required header `{}`", #header_name);
+                            return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+                        }
+                    };
+                });
+                quote! { #field_ident, }
+            } else {
+                quote! {
+                    #field_ident: headers
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(::std::string::String::from),
+                }
             }
         })
         .collect();
@@ -241,6 +260,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
                 async move {
                     use ::axum::response::IntoResponse as _;
                     #auth_extract
+                    #(#header_stmts)*
                     let req = #req_ident { #(#req_fields)* };
                     match __api.#method_ident(req, #auth_call_arg state, headers).await {
                         ::core::result::Result::Ok(r)  => r.into_response(),
