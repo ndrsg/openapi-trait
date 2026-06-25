@@ -1,0 +1,39 @@
+openapi: 3.0.1
+info:
+  title: formats
+  version: 0.0.1
+paths:
+  /event:
+    get:
+      operationId: getEvent
+      responses:
+        '200':
+          description: an event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  schemas:
+    Event:
+      type: object
+      required:
+        - id
+        - createdAt
+        - birthDate
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        birthDate:
+          type: string
+          format: date
+        email:
+          type: string
+          format: email
+        payload:
+          type: string
+          format: binary

@@ -189,6 +189,7 @@ openapi-trait = { version = "0.1", default-features = false }
 | Feature | Status |
 |---|---|
 | `components/schemas` → structs | ✅ |
+| String `format` → specialized types | ✅ — `date-time` → `chrono::DateTime<Utc>`, `date` → `chrono::NaiveDate`, `uuid` → `uuid::Uuid`, `binary` → `Vec<u8>`; `email`/others → `String` (`chrono`/`uuid` re-exported from the facade) |
 | Path parameters | ✅ |
 | Query parameters (including string enums) | ✅ |
 | Header parameters | ✅ |
