@@ -234,3 +234,25 @@ let client = MyClient { /* ... */ }.with_bearer_auth("token");
 ```
 
 Server and client signatures differ intentionally: server handlers see credentials per-call (so RBAC decisions can vary by request); clients carry them session-wide.
+
+## Debugging generated code
+
+To inspect what the macro produces, set the `OPENAPI_TRAIT_DEBUG` environment variable at build time. Each annotated module is written to a prettyprinted `<module_name>.rs` file:
+
+```bash
+OPENAPI_TRAIT_DEBUG=1 cargo build
+```
+
+The value controls where the files go:
+
+| `OPENAPI_TRAIT_DEBUG` | Behaviour |
+|---|---|
+| unset, empty, `0`, `false` | Disabled (default) |
+| `1`, `true` | Write to `$OUT_DIR/openapi-trait-debug`, or `<temp dir>/openapi-trait-debug` if there is no build script |
+| any other value | Treated as the target directory path, e.g. `OPENAPI_TRAIT_DEBUG=./gen` |
+
+The resolved path of each file is printed to stderr during the build. Write failures are reported but never abort compilation.
+
+Unlike [`cargo expand`](https://github.com/dtolnay/cargo-expand), this dumps only the code the macro emits directly — nested derives (`Serialize`, `Deserialize`, …) are left as `#[derive(...)]` rather than recursively expanded — which keeps the output focused on this crate's code generation. The macro re-runs only when the crate is recompiled, so use `cargo clean -p <crate>` or edit the spec to force a fresh dump.
+
+Note that the filename is just the module name, so two `mod petstore { … }` declarations writing to the same directory will overwrite each other; point `OPENAPI_TRAIT_DEBUG` at a per-build directory to keep them separate.

@@ -41,6 +41,15 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 /// First positional argument: path to the `OpenAPI` YAML or JSON file,
 /// relative to the crate root (`CARGO_MANIFEST_DIR`).
 ///
+/// # Debugging
+///
+/// Set the `OPENAPI_TRAIT_DEBUG` environment variable to dump a prettyprinted
+/// copy of the code this macro generates (one level deep, without recursively
+/// expanding nested derives). Use `1`/`true` to write to a default directory
+/// (`$OUT_DIR/openapi-trait-debug`, or the system temp dir), or set it to a
+/// directory path to choose the location. The resolved file path is printed to
+/// stderr during the build.
+///
 /// # Errors
 ///
 /// The macro emits a compile error if:
@@ -111,6 +120,8 @@ fn run_macro(path_lit: &LitStr, item: TokenStream) -> TokenStream {
             #body
         }
     };
+
+    openapi_trait_shared::debug::write_debug_output(mod_ident, &expanded);
 
     expanded.into()
 }
