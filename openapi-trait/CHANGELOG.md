@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.6](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v0.0.5...openapi-trait-v0.0.6) - 2026-06-26
+
+### Fixed
+
+- allow exclusive per requests credentials
+
 ## [0.0.5](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v0.0.4...openapi-trait-v0.0.5) - 2026-06-25
 
 ### Added
