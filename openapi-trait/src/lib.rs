@@ -153,6 +153,19 @@ impl RequestOptions {
         self
     }
 
+    /// Whether these options carry per-request authentication.
+    ///
+    /// Returns `true` once [`bearer_auth`](Self::bearer_auth) or
+    /// [`basic_auth`](Self::basic_auth) has been set. The generated client uses
+    /// this to skip its "missing credential" pre-flight check: a request that
+    /// supplies its own credentials is valid even when the client was built
+    /// without a configured security scheme, letting you authenticate a single
+    /// request without baking credentials into the client.
+    #[must_use]
+    pub const fn provides_auth(&self) -> bool {
+        self.bearer_token.is_some() || self.basic_auth.is_some()
+    }
+
     /// Apply these options to a reqwest request builder.
     ///
     /// Used by the generated reqwest-backed client implementation; you should

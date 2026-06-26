@@ -263,3 +263,30 @@ async fn client_missing_credential_errors_before_send() {
     let msg = format!("{err}");
     assert!(msg.contains("bearerAuth"), "got: {msg}");
 }
+
+#[tokio::test]
+async fn per_request_bearer_works_without_client_credential() {
+    let base = spawn_server().await;
+
+    // Client built with no configured scheme credential. Previously this made
+    // any request fail fast with `MissingCredential`; a per-request token must
+    // now satisfy the operation's auth requirement.
+    let client = DerivedClient {
+        http: openapi_trait::reqwest::Client::new(),
+        endpoint: base,
+        creds: sec_client::SecClientAuthState::default(),
+    };
+
+    let resp = client
+        .get_admin(
+            sec_client::GetAdminRequest {},
+            Some(openapi_trait::RequestOptions::new().bearer_auth("per-request-token")),
+        )
+        .await
+        .unwrap();
+    match resp {
+        sec_client::GetAdminResponse::Status200(body) => {
+            assert_eq!(body.token, "per-request-token");
+        }
+    }
+}
