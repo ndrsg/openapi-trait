@@ -28,7 +28,7 @@ openapiv3 = "2"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 heck = "0.5"
-openapi-trait-shared = { path = "../openapi-trait-shared", version = "0.0.7" }
+openapi-trait-shared = { path = "../openapi-trait-shared", version = "0.0.8" }
 
 [lints]
 workspace = true

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.8](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v0.0.7...openapi-trait-v0.0.8) - 2026-07-02
+
+### Added
+
+- support query styles
+
+### Fixed
+
+- dont emit validate for non Validate deriving types
+
+### Other
+
+- formatting
+
 ## [0.0.7](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v0.0.6...openapi-trait-v0.0.7) - 2026-07-02
 
 ### Added

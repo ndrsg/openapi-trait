@@ -18,8 +18,8 @@ reqwest-client = ["dep:reqwest", "dep:percent-encoding", "openapi-trait-client/r
 validation = ["dep:serde_valid", "openapi-trait-axum/validation", "openapi-trait-client/validation"]
 
 [dependencies]
-openapi-trait-axum = { path = "../openapi-trait-axum", version = "0.0.7" }
-openapi-trait-client = { path = "../openapi-trait-client", version = "0.0.7" }
+openapi-trait-axum = { path = "../openapi-trait-axum", version = "0.0.8" }
+openapi-trait-client = { path = "../openapi-trait-client", version = "0.0.8" }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"], optional = true }
 percent-encoding = { version = "2.3.2", optional = true }
 base64 = "0.22"
