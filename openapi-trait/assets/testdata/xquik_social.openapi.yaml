@@ -1,0 +1,105 @@
+openapi: 3.1.0
+info:
+  title: Xquik Social API Fixture
+  version: 1.0.0
+servers:
+  - url: https://xquik.com
+security:
+  - apiKeyAuth: []
+paths:
+  /api/v1/x/tweets/search:
+    get:
+      operationId: searchTweets
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tweet search response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchTweetsPayload"
+  /api/v1/x/tweets/{tweetId}/reply:
+    post:
+      operationId: replyToTweet
+      parameters:
+        - name: tweetId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReplyRequest"
+      responses:
+        "200":
+          description: Created reply
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Tweet"
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    SearchTweetsPayload:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tweet"
+        nextCursor:
+          type: string
+    Tweet:
+      type: object
+      required: [id, text, authorUsername]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+        authorUsername:
+          type: string
+        metrics:
+          $ref: "#/components/schemas/TweetMetrics"
+    TweetMetrics:
+      type: object
+      properties:
+        likes:
+          type: integer
+        reposts:
+          type: integer
+        replies:
+          type: integer
+    ReplyRequest:
+      type: object
+      required: [text]
+      properties:
+        text:
+          type: string
+          maxLength: 280
