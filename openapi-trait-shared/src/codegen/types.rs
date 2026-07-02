@@ -17,7 +17,11 @@ use quote::{format_ident, quote};
 #[must_use]
 pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
     let mut sink: Vec<TokenStream> = Vec::new();
-    schema_to_rust_type_ctx(ref_or, required, None, &mut sink)
+    // No parent name means no synthesis, so the (discarded) sink never receives a
+    // model whose fields would need validation attributes; an empty model set is
+    // therefore sufficient here.
+    let models = std::collections::BTreeSet::new();
+    schema_to_rust_type_ctx(ref_or, required, None, &mut sink, &models)
     // sink is discarded — by definition no parent name means no synthesis.
 }
 
@@ -33,8 +37,9 @@ pub fn schema_to_rust_type_ctx(
     required: bool,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, inline_types);
+    let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, inline_types, models);
     if required {
         inner
     } else {
@@ -48,10 +53,11 @@ fn ref_or_to_inner_type_ctx(
     ref_or: &ReferenceOr<Schema>,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     match ref_or {
         ReferenceOr::Reference { reference } => ref_to_ident(reference),
-        ReferenceOr::Item(schema) => schema_kind_to_type(schema, parent_name, inline_types),
+        ReferenceOr::Item(schema) => schema_kind_to_type(schema, parent_name, inline_types, models),
     }
 }
 
@@ -69,15 +75,16 @@ fn schema_kind_to_type(
     schema: &Schema,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     match &schema.schema_kind {
         SchemaKind::Type(Type::String(_)) if is_string_enum(schema) => {
             synthesize_inline_string_enum(schema, parent_name, inline_types)
         }
         SchemaKind::Type(Type::Object(obj)) => {
-            object_schema_to_type(schema, obj, parent_name, inline_types)
+            object_schema_to_type(schema, obj, parent_name, inline_types, models)
         }
-        SchemaKind::Type(t) => primitive_type_to_rust(t, parent_name, inline_types),
+        SchemaKind::Type(t) => primitive_type_to_rust(t, parent_name, inline_types, models),
         SchemaKind::OneOf { one_of } => {
             synthesize_inline_composition(parent_name, inline_types, |name, sink| {
                 super::compositions::generate_one_of(
@@ -86,6 +93,7 @@ fn schema_kind_to_type(
                     schema.schema_data.discriminator.as_ref(),
                     schema.schema_data.description.as_ref(),
                     sink,
+                    models,
                 )
             })
         }
@@ -96,6 +104,7 @@ fn schema_kind_to_type(
                     any_of,
                     schema.schema_data.description.as_ref(),
                     sink,
+                    models,
                 )
             })
         }
@@ -106,6 +115,7 @@ fn schema_kind_to_type(
                     all_of,
                     schema.schema_data.description.as_ref(),
                     sink,
+                    models,
                 )
             })
         }
@@ -158,6 +168,7 @@ fn primitive_type_to_rust(
     t: &Type,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     match t {
         Type::Integer(i) => {
@@ -179,7 +190,14 @@ fn primitive_type_to_rust(
         Type::Array(a) => {
             let item_ty = a.items.as_ref().map_or_else(
                 || quote! { ::serde_json::Value },
-                |items| ref_or_to_inner_type_ctx(&items.clone().unbox(), parent_name, inline_types),
+                |items| {
+                    ref_or_to_inner_type_ctx(
+                        &items.clone().unbox(),
+                        parent_name,
+                        inline_types,
+                        models,
+                    )
+                },
             );
             quote! { ::std::vec::Vec<#item_ty> }
         }
@@ -234,14 +252,17 @@ fn object_schema_to_type(
     obj: &ObjectType,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     if !obj.properties.is_empty() {
         return synthesize_inline_composition(parent_name, inline_types, |name, sink| {
-            super::schemas::generate_object_struct(name, schema, obj, sink)
+            super::schemas::generate_object_struct(name, schema, obj, sink, models)
         });
     }
     if let Some(ap) = &obj.additional_properties {
-        if let Some(value_ty) = additional_properties_value_type(ap, parent_name, inline_types) {
+        if let Some(value_ty) =
+            additional_properties_value_type(ap, parent_name, inline_types, models)
+        {
             return quote! {
                 ::std::collections::HashMap<::std::string::String, #value_ty>
             };
@@ -262,13 +283,17 @@ pub fn additional_properties_value_type(
     ap: &AdditionalProperties,
     parent_name: Option<&str>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> Option<TokenStream> {
     match ap {
         AdditionalProperties::Any(false) => None,
         AdditionalProperties::Any(true) => Some(quote! { ::serde_json::Value }),
-        AdditionalProperties::Schema(schema) => {
-            Some(ref_or_to_inner_type_ctx(schema, parent_name, inline_types))
-        }
+        AdditionalProperties::Schema(schema) => Some(ref_or_to_inner_type_ctx(
+            schema,
+            parent_name,
+            inline_types,
+            models,
+        )),
     }
 }
 

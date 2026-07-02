@@ -32,7 +32,17 @@ components:
         - ratio
         - tags
         - inner
+        - id
       properties:
+        id:
+          # $ref to a scalar alias (`type: WidgetId = String`). A bare
+          # `#[validate]` here would try to call `.validate()` on a `String`
+          # and fail to compile.
+          $ref: '#/components/schemas/WidgetId'
+        labels:
+          # Optional $ref to a map alias (`Labels = HashMap<String, String>`),
+          # reproducing the `Option<HashMap<String, String>>` compile error.
+          $ref: '#/components/schemas/Labels'
         name:
           type: string
           minLength: 2
@@ -65,3 +75,13 @@ components:
         code:
           type: string
           minLength: 3
+    # A scalar alias: lowers to `pub type WidgetId = String;`, which does not
+    # derive `Validate`. A `$ref` to it must not emit a bare `#[validate]`.
+    WidgetId:
+      type: string
+    # A map alias: lowers to `pub type Labels = HashMap<String, String>;`, which
+    # also does not derive `Validate`.
+    Labels:
+      type: object
+      additionalProperties:
+        type: string

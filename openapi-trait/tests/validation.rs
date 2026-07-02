@@ -16,6 +16,12 @@ fn valid_widget() -> example::Widget {
         ratio: 0.5,
         tags: vec!["a".into(), "b".into()],
         inner: example::Inner { code: "abc".into() },
+        // `id` is a `$ref` to a scalar alias (`WidgetId = String`) and `labels`
+        // a `$ref` to a map alias (`Labels = HashMap<String, String>`). Neither
+        // derives `Validate`; the fact that this compiles is the regression
+        // guard against emitting a bare `#[validate]` on non-model refs.
+        id: "w-1".into(),
+        labels: None,
     }
 }
 
@@ -79,6 +85,23 @@ fn array_unique_items_enforced() {
     let mut w = valid_widget();
     w.tags = vec!["dup".into(), "dup".into()]; // uniqueItems violated
     assert!(w.validate().is_err());
+}
+
+#[test]
+fn scalar_and_map_alias_refs_do_not_break_validation() {
+    // A widget carrying `$ref`s to a scalar alias and a map alias still
+    // validates: those refs must not emit a bare `#[validate]` (which would not
+    // compile), and populating `labels` must not change the outcome.
+    let mut w = valid_widget();
+    w.labels = Some(
+        [
+            ("env".to_string(), "prod".to_string()),
+            ("tier".to_string(), "gold".to_string()),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    assert!(w.validate().is_ok());
 }
 
 #[test]

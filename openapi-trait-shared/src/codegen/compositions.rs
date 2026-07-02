@@ -36,8 +36,16 @@ pub fn generate_one_of(
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    generate_enum(name, variants, discriminator, description, inline_types)
+    generate_enum(
+        name,
+        variants,
+        discriminator,
+        description,
+        inline_types,
+        models,
+    )
 }
 
 /// Generate a Rust enum type for an `anyOf` composition.
@@ -51,8 +59,9 @@ pub fn generate_any_of(
     variants: &[ReferenceOr<Schema>],
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    generate_enum(name, variants, None, description, inline_types)
+    generate_enum(name, variants, None, description, inline_types, models)
 }
 
 /// Generate a Rust struct type for an `allOf` composition.
@@ -67,6 +76,7 @@ pub fn generate_all_of(
     variants: &[ReferenceOr<Schema>],
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&description.cloned());
@@ -95,6 +105,7 @@ pub fn generate_all_of(
                             is_required,
                             name,
                             inline_types,
+                            models,
                         ));
                     }
                 } else {
@@ -108,6 +119,7 @@ pub fn generate_all_of(
                         true,
                         Some(&parent),
                         inline_types,
+                        models,
                     );
                     fields.push(quote! {
                         #[serde(flatten)]
@@ -135,6 +147,7 @@ fn generate_enum(
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&description.cloned());
@@ -150,7 +163,9 @@ fn generate_enum(
     let variant_tokens: Vec<TokenStream> = variants
         .iter()
         .enumerate()
-        .map(|(idx, branch)| build_enum_variant(name, idx, branch, discriminator, inline_types))
+        .map(|(idx, branch)| {
+            build_enum_variant(name, idx, branch, discriminator, inline_types, models)
+        })
         .collect();
 
     let derives = model_derives();
@@ -171,6 +186,7 @@ fn build_enum_variant(
     branch: &ReferenceOr<Schema>,
     discriminator: Option<&Discriminator>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     match branch {
         ReferenceOr::Reference { reference } => {
@@ -196,6 +212,7 @@ fn build_enum_variant(
                 true,
                 Some(&parent_for_synth),
                 inline_types,
+                models,
             );
             quote! {
                 #variant_ident(#ty)

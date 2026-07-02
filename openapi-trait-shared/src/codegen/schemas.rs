@@ -20,11 +20,20 @@ pub fn generate_schemas(openapi: &OpenAPI) -> TokenStream {
         return quote! {};
     };
 
+    // Names of schemas whose generated type derives `Validate`, so a `$ref`
+    // field to one can safely carry a bare `#[validate]`. Empty without the
+    // feature; unused there but threaded uniformly to keep signatures stable.
+    #[cfg(feature = "validation")]
+    let models: std::collections::BTreeSet<String> =
+        super::validation::validatable_model_names(openapi);
+    #[cfg(not(feature = "validation"))]
+    let models: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
     let mut inline_types: Vec<TokenStream> = Vec::new();
     let items: Vec<TokenStream> = components
         .schemas
         .iter()
-        .map(|(name, ref_or)| generate_schema_item(name, ref_or, &mut inline_types))
+        .map(|(name, ref_or)| generate_schema_item(name, ref_or, &mut inline_types, &models))
         .collect();
 
     quote! {
@@ -38,6 +47,7 @@ fn generate_schema_item(
     name: &str,
     ref_or: &ReferenceOr<Schema>,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let schema = match ref_or {
         ReferenceOr::Item(s) => s,
@@ -60,26 +70,29 @@ fn generate_schema_item(
             schema.schema_data.discriminator.as_ref(),
             schema.schema_data.description.as_ref(),
             inline_types,
+            models,
         ),
         SchemaKind::AnyOf { any_of } => generate_any_of(
             name,
             any_of,
             schema.schema_data.description.as_ref(),
             inline_types,
+            models,
         ),
         SchemaKind::AllOf { all_of } => generate_all_of(
             name,
             all_of,
             schema.schema_data.description.as_ref(),
             inline_types,
+            models,
         ),
         SchemaKind::Type(Type::Object(obj)) => {
-            generate_object_struct(name, schema, obj, inline_types)
+            generate_object_struct(name, schema, obj, inline_types, models)
         }
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
             let ident = format_ident!("{}", name.to_pascal_case());
-            let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), inline_types);
+            let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), inline_types, models);
             let doc = doc_attr(&schema.schema_data.description);
             quote! {
                 #doc
@@ -132,6 +145,7 @@ pub fn generate_object_struct(
     schema: &Schema,
     obj: &openapiv3::ObjectType,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let ident = format_ident!("{}", name.to_pascal_case());
     let doc = doc_attr(&schema.schema_data.description);
@@ -140,7 +154,9 @@ pub fn generate_object_struct(
     // is emitted as a `HashMap` type alias rather than an empty struct.
     if obj.properties.is_empty() {
         if let Some(ap) = &obj.additional_properties {
-            if let Some(value_ty) = additional_properties_value_type(ap, Some(name), inline_types) {
+            if let Some(value_ty) =
+                additional_properties_value_type(ap, Some(name), inline_types, models)
+            {
                 return quote! {
                     #doc
                     pub type #ident =
@@ -161,6 +177,7 @@ pub fn generate_object_struct(
                 is_required,
                 name,
                 inline_types,
+                models,
             )
         })
         .collect();
@@ -169,13 +186,15 @@ pub fn generate_object_struct(
     // extra entries into a flattened `HashMap` catch-all field.
     let additional_field = obj.additional_properties.as_ref().and_then(|ap| {
         let synth_name = format!("{name}AdditionalProperties");
-        additional_properties_value_type(ap, Some(&synth_name), inline_types).map(|value_ty| {
-            quote! {
-                #[serde(flatten)]
-                pub additional_properties:
-                    ::std::collections::HashMap<::std::string::String, #value_ty>,
-            }
-        })
+        additional_properties_value_type(ap, Some(&synth_name), inline_types, models).map(
+            |value_ty| {
+                quote! {
+                    #[serde(flatten)]
+                    pub additional_properties:
+                        ::std::collections::HashMap<::std::string::String, #value_ty>,
+                }
+            },
+        )
     });
 
     let derives = model_derives();
@@ -204,6 +223,7 @@ pub fn object_field_tokens(
     is_required: bool,
     parent_struct_name: &str,
     inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let snake = prop_name.to_snake_case();
     let field_ident = super::idents::keyword_safe_ident(&snake);
@@ -218,16 +238,26 @@ pub fn object_field_tokens(
     };
 
     let synth_name = format!("{parent_struct_name}{}", prop_name.to_pascal_case());
-    let field_type =
-        schema_to_rust_type_ctx(prop_ref_or, is_required, Some(&synth_name), inline_types);
+    let field_type = schema_to_rust_type_ctx(
+        prop_ref_or,
+        is_required,
+        Some(&synth_name),
+        inline_types,
+        models,
+    );
 
     // `serde_valid` validation attributes derived from the schema's constraints
     // (`minLength`, `minimum`, `minItems`, …). Emitted only under the
     // `validation` feature; otherwise the field is byte-identical to before.
     #[cfg(feature = "validation")]
-    let validate_attrs = super::validation::validation_attrs(prop_ref_or);
+    let validate_attrs = super::validation::validation_attrs(prop_ref_or, models);
     #[cfg(not(feature = "validation"))]
-    let validate_attrs = quote! {};
+    let validate_attrs = {
+        // `models` is only consulted under the `validation` feature; without it
+        // the parameter is otherwise unused.
+        let _ = models;
+        quote! {}
+    };
 
     quote! {
         #field_doc
