@@ -21,6 +21,13 @@ openapiv3 = "2"
 heck = "0.5"
 indexmap = "2"
 
+[features]
+# When enabled, generated model types derive `serde_valid::Validate` and carry
+# `#[validate(...)]` attributes reflecting the OpenAPI schema constraints. The
+# facade crate provides the actual `serde_valid` dependency (re-exported for the
+# generated code); this flag only toggles what the codegen emits.
+validation = []
+
 [dev-dependencies]
 serde_yaml = "0.9"
 

@@ -109,14 +109,10 @@ pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
+    let derives = model_derives();
     quote! {
         #doc
-        #[derive(
-            ::core::fmt::Debug,
-            ::core::clone::Clone,
-            ::serde::Serialize,
-            ::serde::Deserialize,
-        )]
+        #derives
 
         pub enum #ident {
             #(#variants,)*
@@ -182,14 +178,10 @@ pub fn generate_object_struct(
         })
     });
 
+    let derives = model_derives();
     quote! {
         #doc
-        #[derive(
-            ::core::fmt::Debug,
-            ::core::clone::Clone,
-            ::serde::Serialize,
-            ::serde::Deserialize,
-        )]
+        #derives
 
         pub struct #ident {
             #(#fields)*
@@ -229,9 +221,18 @@ pub fn object_field_tokens(
     let field_type =
         schema_to_rust_type_ctx(prop_ref_or, is_required, Some(&synth_name), inline_types);
 
+    // `serde_valid` validation attributes derived from the schema's constraints
+    // (`minLength`, `minimum`, `minItems`, …). Emitted only under the
+    // `validation` feature; otherwise the field is byte-identical to before.
+    #[cfg(feature = "validation")]
+    let validate_attrs = super::validation::validation_attrs(prop_ref_or);
+    #[cfg(not(feature = "validation"))]
+    let validate_attrs = quote! {};
+
     quote! {
         #field_doc
         #rename_attr
+        #validate_attrs
         pub #field_ident: #field_type,
     }
 }
@@ -242,4 +243,30 @@ pub fn doc_attr(description: &Option<String>) -> TokenStream {
     description
         .as_ref()
         .map_or_else(|| quote! {}, |d| quote! { #[doc = #d] })
+}
+
+/// The `#[derive(...)]` attribute applied to every generated model struct and
+/// enum.
+///
+/// With the `validation` feature enabled, `serde_valid::Validate` is appended so
+/// the generated field-level `#[validate(...)]` attributes take effect and
+/// callers can run `model.validate()`. The derive is referenced through the
+/// facade re-export (`::openapi_trait::serde_valid`), matching the convention
+/// used for `chrono`/`uuid`.
+#[must_use]
+pub fn model_derives() -> TokenStream {
+    #[cfg(feature = "validation")]
+    let extra = quote! { , ::openapi_trait::serde_valid::Validate };
+    #[cfg(not(feature = "validation"))]
+    let extra = quote! {};
+
+    quote! {
+        #[derive(
+            ::core::fmt::Debug,
+            ::core::clone::Clone,
+            ::serde::Serialize,
+            ::serde::Deserialize
+            #extra
+        )]
+    }
 }

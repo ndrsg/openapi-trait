@@ -1,0 +1,67 @@
+# Exercises every OpenAPI constraint keyword that maps to a `serde_valid`
+# `#[validate(...)]` attribute, plus a nested `$ref` field to confirm that a
+# top-level `.validate()` recurses into referenced models.
+openapi: 3.0.1
+info:
+  version: 1.0.0
+  title: Validation Example
+paths:
+  /widgets/{widgetId}:
+    get:
+      operationId: getWidget
+      parameters:
+        - name: widgetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - name
+        - count
+        - ratio
+        - tags
+        - inner
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 10
+          pattern: '^[a-z]+$'
+        count:
+          type: integer
+          minimum: 1
+          maximum: 100
+          multipleOf: 5
+        ratio:
+          type: number
+          minimum: 0
+          exclusiveMaximum: true
+          maximum: 1
+        tags:
+          type: array
+          minItems: 1
+          maxItems: 3
+          uniqueItems: true
+          items:
+            type: string
+        inner:
+          $ref: '#/components/schemas/Inner'
+    Inner:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+          minLength: 3

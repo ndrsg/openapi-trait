@@ -22,7 +22,7 @@ use openapiv3::{Discriminator, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use super::schemas::{doc_attr, object_field_tokens};
+use super::schemas::{doc_attr, model_derives, object_field_tokens};
 use super::types::{ref_to_ident, schema_to_rust_type_ctx};
 
 /// Generate a Rust enum type for a `oneOf` composition.
@@ -118,14 +118,10 @@ pub fn generate_all_of(
         }
     }
 
+    let derives = model_derives();
     quote! {
         #doc
-        #[derive(
-            ::core::fmt::Debug,
-            ::core::clone::Clone,
-            ::serde::Serialize,
-            ::serde::Deserialize,
-        )]
+        #derives
         pub struct #ident {
             #(#fields)*
         }
@@ -157,14 +153,10 @@ fn generate_enum(
         .map(|(idx, branch)| build_enum_variant(name, idx, branch, discriminator, inline_types))
         .collect();
 
+    let derives = model_derives();
     quote! {
         #doc
-        #[derive(
-            ::core::fmt::Debug,
-            ::core::clone::Clone,
-            ::serde::Serialize,
-            ::serde::Deserialize,
-        )]
+        #derives
         #serde_attr
         pub enum #ident {
             #(#variant_tokens,)*

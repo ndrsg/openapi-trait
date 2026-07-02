@@ -18,6 +18,7 @@ proc-macro = true
 [features]
 default = []
 reqwest-client = []
+validation = ["openapi-trait-shared/validation"]
 
 [dependencies]
 proc-macro2 = "1"

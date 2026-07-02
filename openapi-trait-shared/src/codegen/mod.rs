@@ -4,6 +4,8 @@ pub mod operations;
 pub mod schemas;
 pub mod security;
 pub mod types;
+#[cfg(feature = "validation")]
+pub mod validation;
 
 use openapiv3::OpenAPI;
 use proc_macro2::TokenStream;

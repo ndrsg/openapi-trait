@@ -48,6 +48,27 @@
 //! The `reqwest-client` feature is enabled by default. It adds [`ReqwestClient`],
 //! [`ReqwestClientCore`], and the [`reqwest`] re-export used by the generated blanket
 //! client implementation.
+//!
+//! # Validation
+//!
+//! The non-default `validation` feature makes every generated model type derive
+//! [`serde_valid::Validate`](https://docs.rs/serde_valid) and gain
+//! `#[validate(...)]` field attributes reflecting the schema's constraints
+//! (`minLength`, `minimum`, `pattern`, `minItems`, `uniqueItems`, …). Bring the
+//! `Validate` trait into scope (`serde_valid` is re-exported by this crate under
+//! the feature) and call `.validate()`:
+//!
+//! ```toml
+//! openapi-trait = { version = "0.1", features = ["validation"] }
+//! ```
+//!
+//! ```ignore
+//! use openapi_trait::serde_valid::Validate as _;
+//! widget.validate()?; // Err if any declared constraint is violated
+//! ```
+//!
+//! Validation is opt-in and non-enforcing — nothing calls `.validate()` for you,
+//! and with the feature off the generated code is unchanged.
 
 #[doc(inline)]
 pub use openapi_trait_axum::openapi_trait as axum;
@@ -241,3 +262,11 @@ pub use reqwest;
 pub use base64;
 pub use chrono;
 pub use uuid;
+
+/// Re-export of [`serde_valid`], backing the `#[validate(...)]` attributes on
+/// generated model types when the `validation` feature is enabled.
+///
+/// Bring [`serde_valid::Validate`] into scope to call `model.validate()` on the
+/// generated structs and enums.
+#[cfg(feature = "validation")]
+pub use serde_valid;

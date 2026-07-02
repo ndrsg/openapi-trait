@@ -184,11 +184,50 @@ Disable default features if you only want the transport-agnostic trait:
 openapi-trait = { version = "0.1", default-features = false }
 ```
 
+## Validation
+
+Enable the non-default `validation` feature to have generated model types carry
+[`serde_valid`](https://docs.rs/serde_valid) validation derived from the
+schema's constraints:
+
+```toml
+[dependencies]
+openapi-trait = { version = "0.1", features = ["validation"] }
+```
+
+With the feature on, every generated struct and enum derives
+`serde_valid::Validate`, and fields gain `#[validate(...)]` attributes reflecting
+the OpenAPI constraint keywords. Call `.validate()` to check a value:
+
+```rust
+use openapi_trait::serde_valid::Validate as _;
+
+let widget = api::Widget { name: "gadget".into(), count: 25, /* ... */ };
+widget.validate()?; // Err if any constraint is violated
+```
+
+The constraint mapping:
+
+| OpenAPI keyword | `serde_valid` attribute |
+|---|---|
+| `minLength` / `maxLength` / `pattern` | `min_length` / `max_length` / `pattern` |
+| `minimum` / `maximum` (+ `exclusiveMinimum` / `exclusiveMaximum`) | `minimum` / `maximum` (or `exclusive_minimum` / `exclusive_maximum`) |
+| `multipleOf` | `multiple_of` |
+| `minItems` / `maxItems` / `uniqueItems` | `min_items` / `max_items` / `unique_items` |
+| `$ref` / inline object / `oneOf`·`anyOf`·`allOf` field | bare `#[validate]` (recurses into the nested model) |
+
+Validation is **opt-in and non-enforcing**: nothing calls `.validate()` for you —
+the server and client boundaries are unchanged. When the feature is off, codegen
+output is identical to a build without it. A top-level schema that lowers to a
+type alias (e.g. `pub type Foo = String;`) can only be validated where it is used
+as a struct field.
+
 ## OpenAPI support
 
 | Feature | Status |
 |---|---|
 | `components/schemas` → structs | ✅ |
+| Schema constraints → `serde_valid` | ✅ — opt-in via the `validation` feature (`minLength`, `minimum`, `pattern`, `minItems`, `uniqueItems`, …) |
 | String `format` → specialized types | ✅ — `date-time` → `chrono::DateTime<Utc>`, `date` → `chrono::NaiveDate`, `uuid` → `uuid::Uuid`, `binary` → `Vec<u8>`; `email`/others → `String` (`chrono`/`uuid` re-exported from the facade) |
 | Path parameters | ✅ |
 | Query parameters (including string enums) | ✅ |

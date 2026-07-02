@@ -15,6 +15,7 @@ documentation = "https://docs.rs/openapi-trait"
 [features]
 default = ["reqwest-client"]
 reqwest-client = ["dep:reqwest", "dep:percent-encoding", "openapi-trait-client/reqwest-client"]
+validation = ["dep:serde_valid", "openapi-trait-axum/validation", "openapi-trait-client/validation"]
 
 [dependencies]
 openapi-trait-axum = { path = "../openapi-trait-axum", version = "0.0.6" }
@@ -24,6 +25,7 @@ percent-encoding = { version = "2.3.2", optional = true }
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
 uuid = { version = "1", default-features = false, features = ["serde"] }
+serde_valid = { version = "2", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -31,6 +33,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 axum = "0.8"
 serde = { version = "1", features = ["derive"]}
 serde_json = "1"
+serde_valid = "2"
 
 [lints]
 workspace = true
