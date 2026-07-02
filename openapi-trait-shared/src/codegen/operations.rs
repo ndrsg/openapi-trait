@@ -1,7 +1,7 @@
 use heck::ToPascalCase;
 use openapiv3::{
-    MediaType, OpenAPI, Operation, Parameter, PathItem, ReferenceOr, RequestBody, Response,
-    Responses, Schema, StatusCode,
+    MediaType, OpenAPI, Operation, Parameter, PathItem, QueryStyle, ReferenceOr, RequestBody,
+    Response, Responses, Schema, SchemaKind, StatusCode, Type,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -30,6 +30,55 @@ pub struct OperationInfo {
     pub auth: OpSecurity,
 }
 
+/// How a query parameter's array (or object) value is delimited on the wire,
+/// derived from the `OpenAPI` `style` keyword for `in: query` parameters.
+///
+/// Only meaningful for query params; other locations default to [`Self::Form`].
+/// `DeepObject` is recognized but not yet serialized per-spec — it falls back to
+/// default serialization with a build warning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryStyleKind {
+    /// `style: form` — repeated keys when exploded, comma-joined otherwise.
+    Form,
+    /// `style: spaceDelimited` — space-joined array values (when not exploded).
+    Space,
+    /// `style: pipeDelimited` — pipe-joined array values (when not exploded).
+    Pipe,
+    /// `style: deepObject` — nested object rendering (unsupported; warns).
+    DeepObject,
+}
+
+impl QueryStyleKind {
+    /// The single-character delimiter used to join array values when the
+    /// parameter is not exploded (`form` → `,`, space → ` `, pipe → `|`).
+    #[must_use]
+    pub const fn delimiter(self) -> &'static str {
+        match self {
+            Self::Space => " ",
+            Self::Pipe => "|",
+            // `form` uses comma; `deepObject` never reaches the join path but
+            // comma is a harmless fallback.
+            Self::Form | Self::DeepObject => ",",
+        }
+    }
+}
+
+/// How a query parameter is serialized on the wire, resolved from its `style`,
+/// `explode`, and schema shape. Populated with defaults for non-query params.
+#[derive(Debug)]
+pub struct QuerySerialization {
+    /// The `style` keyword; defaults to [`QueryStyleKind::Form`].
+    pub style: QueryStyleKind,
+    /// Resolved `explode` flag (spec default: `true` for `form`, `false` for the
+    /// other styles).
+    pub explode: bool,
+    /// True when the schema is an array (the Rust type is `Vec<T>`).
+    pub is_array: bool,
+    /// The element type `T` when [`Self::is_array`] is true, so the server can
+    /// parse array elements one at a time.
+    pub array_item_type: Option<TokenStream>,
+}
+
 #[derive(Debug)]
 pub struct ParamInfo {
     pub name: String,
@@ -46,6 +95,8 @@ pub struct ParamInfo {
     pub enum_ident: Option<syn::Ident>,
     /// Enum values when `is_enum` is true.
     pub enum_values: Vec<String>,
+    /// Query serialization strategy (meaningful only for query params).
+    pub query: QuerySerialization,
 }
 
 #[derive(Debug)]
@@ -305,6 +356,23 @@ fn collect_params(
             quote! { ::std::string::String }
         };
 
+        let query = query_serialization(param, param_schema.as_ref());
+
+        // deepObject and object-valued query params are not yet serialized
+        // per-spec; warn and fall back to default form serialization.
+        if matches!(param, Parameter::Query { .. }) {
+            let is_object = matches!(
+                param_schema.as_ref().map(|s| &s.schema_kind),
+                Some(SchemaKind::Type(Type::Object(_)))
+            );
+            if matches!(query.style, QueryStyleKind::DeepObject) || is_object {
+                diag.warn(format!(
+                    "operation `{operation_id}`: query parameter `{}` uses deepObject/object serialization, which is not yet supported; falling back to default form serialization",
+                    data.name
+                ));
+            }
+        }
+
         let info = ParamInfo {
             name: data.name.clone(),
             field_ident,
@@ -314,6 +382,7 @@ fn collect_params(
             is_enum,
             enum_ident,
             enum_values,
+            query,
         };
 
         match param {
@@ -328,6 +397,49 @@ fn collect_params(
     }
 
     Some((path_params, query_params, header_params))
+}
+
+/// Resolve a parameter's [`QuerySerialization`] from its `style`/`explode` and
+/// schema shape. Only `in: query` params carry a `style`; other locations get
+/// defaults (`form`, not exploded, not an array).
+fn query_serialization(param: &Parameter, param_schema: Option<&Schema>) -> QuerySerialization {
+    // Per the spec `explode` defaults to true for `form` and false otherwise.
+    let (style, explode) = match param {
+        Parameter::Query { style, .. } => {
+            let kind = match style {
+                QueryStyle::Form => QueryStyleKind::Form,
+                QueryStyle::SpaceDelimited => QueryStyleKind::Space,
+                QueryStyle::PipeDelimited => QueryStyleKind::Pipe,
+                QueryStyle::DeepObject => QueryStyleKind::DeepObject,
+            };
+            let explode = param
+                .parameter_data_ref()
+                .explode
+                .unwrap_or(matches!(kind, QueryStyleKind::Form));
+            (kind, explode)
+        }
+        _ => (QueryStyleKind::Form, false),
+    };
+
+    // Detect array schemas so array query params can be serialized per style and
+    // parsed element-by-element on the server.
+    let (is_array, array_item_type) = match param_schema.map(|s| &s.schema_kind) {
+        Some(SchemaKind::Type(Type::Array(arr))) => {
+            let item_ty = arr.items.as_ref().map_or_else(
+                || quote! { ::serde_json::Value },
+                |items| schema_to_rust_type(&items.clone().unbox(), true),
+            );
+            (true, Some(item_ty))
+        }
+        _ => (false, None),
+    };
+
+    QuerySerialization {
+        style,
+        explode,
+        is_array,
+        array_item_type,
+    }
 }
 
 /// Resolve a `$ref` to a parameter from the components section.
@@ -906,6 +1018,109 @@ paths:
         assert!(
             normalized.contains("x_optional:::core::option::Option<::std::string::String>"),
             "optional header must stay an Option: {struct_src}"
+        );
+    }
+
+    #[test]
+    fn query_style_and_explode_are_parsed_from_the_spec() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /items:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: tag
+          in: query
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - name: csv
+          in: query
+          style: spaceDelimited
+          schema: { type: array, items: { type: integer } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        let q = &ops[0].query_params;
+        assert_eq!(q.len(), 2);
+
+        let tag = &q[0];
+        assert_eq!(tag.query.style, QueryStyleKind::Form);
+        assert!(tag.query.explode, "explode: true is honored");
+        assert!(tag.query.is_array);
+        assert!(tag.query.array_item_type.is_some());
+
+        let csv = &q[1];
+        assert_eq!(csv.query.style, QueryStyleKind::Space);
+        // spaceDelimited defaults explode to false.
+        assert!(!csv.query.explode);
+        assert!(csv.query.is_array);
+    }
+
+    #[test]
+    fn explode_defaults_true_for_form_and_false_for_other_styles() {
+        let (ops, _) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /items:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: form_default
+          in: query
+          schema: { type: array, items: { type: string } }
+        - name: pipe_default
+          in: query
+          style: pipeDelimited
+          schema: { type: array, items: { type: string } }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        let q = &ops[0].query_params;
+        assert_eq!(q[0].query.style, QueryStyleKind::Form);
+        assert!(q[0].query.explode, "form defaults explode to true");
+        assert_eq!(q[1].query.style, QueryStyleKind::Pipe);
+        assert!(!q[1].query.explode, "non-form styles default explode to false");
+    }
+
+    #[test]
+    fn deep_object_and_object_query_params_warn_but_keep_the_operation() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /items:
+    get:
+      operationId: searchItems
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties: { type: string }
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        assert_eq!(diag.warnings.len(), 1);
+        assert!(
+            diag.warnings[0].contains("deepObject/object"),
+            "{:?}",
+            diag.warnings
         );
     }
 

@@ -1,0 +1,103 @@
+openapi: 3.0.3
+info:
+  title: Query Styles
+  version: "1.0"
+paths:
+  /items:
+    get:
+      operationId: searchItems
+      summary: Search items using every supported array query style.
+      parameters:
+        - name: tag
+          in: query
+          description: form style, exploded (repeated keys).
+          required: false
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              type: string
+        - name: csv
+          in: query
+          description: form style, not exploded (comma-joined).
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: space
+          in: query
+          description: spaceDelimited (space-joined).
+          required: false
+          style: spaceDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: pipe
+          in: query
+          description: pipeDelimited (pipe-joined).
+          required: false
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: string
+        - name: ids
+          in: query
+          description: comma-joined integer array (exercises numeric parsing).
+          required: false
+          style: form
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+              format: int32
+        - name: q
+          in: query
+          description: a plain scalar param (unchanged behavior).
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: echoed parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+components:
+  schemas:
+    SearchResult:
+      type: object
+      required: [tag, csv, space, pipe, ids]
+      properties:
+        tag:
+          type: array
+          items:
+            type: string
+        csv:
+          type: array
+          items:
+            type: string
+        space:
+          type: array
+          items:
+            type: string
+        pipe:
+          type: array
+          items:
+            type: string
+        ids:
+          type: array
+          items:
+            type: integer
+            format: int32
+        q:
+          type: string

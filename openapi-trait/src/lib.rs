@@ -261,6 +261,9 @@ pub use reqwest;
 
 pub use base64;
 pub use chrono;
+/// Re-export of [`form_urlencoded`], used by generated axum server code to
+/// decode raw query strings when applying `OpenAPI` `style`/`explode` rules.
+pub use form_urlencoded;
 pub use uuid;
 
 /// Re-export of [`serde_valid`], backing the `#[validate(...)]` attributes on

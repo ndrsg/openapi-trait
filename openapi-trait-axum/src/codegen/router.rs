@@ -17,25 +17,96 @@ pub fn generate_router(
 
     let into_response_impls: Vec<TokenStream> =
         ops.iter().map(generate_into_response_impl).collect();
-    let (query_structs, route_calls): (Vec<_>, Vec<_>) =
-        ops.iter().map(|op| generate_route(op, schemes)).unzip();
+    let route_calls: Vec<TokenStream> =
+        ops.iter().map(|op| generate_route(op, schemes)).collect();
 
     let auth_helpers = generate_auth_helpers(schemes);
+    let query_helpers = generate_query_helpers(ops, schemes);
 
     quote! {
         #(#into_response_impls)*
 
         #auth_helpers
+        #query_helpers
 
         fn make_router<T, S>(__api: ::std::sync::Arc<T>) -> ::axum::Router<S>
         where
             T: #trait_name<S> + ::core::marker::Send + ::core::marker::Sync + 'static,
             S: ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
-            #(#query_structs)*
             ::axum::Router::new()
                 #(#route_calls)*
         }
+    }
+}
+
+/// Collect the query-string keys used by an operation's active auth schemes
+/// (API keys carried `in: query`), so the router can read them out of the parsed
+/// query pairs.
+fn collect_auth_query_keys<'a>(op: &'a OperationInfo, schemes: &'a [SchemeInfo]) -> Vec<&'a str> {
+    resolve_alternatives(&op.auth, schemes)
+        .iter()
+        .filter_map(|s| match &s.kind {
+            SchemeKind::ApiKey {
+                key,
+                location: ApiKeyIn::Query,
+            } => Some(key.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether an operation's route needs to parse the raw query string at all
+/// (it has declared query params or reads an auth credential from the query).
+fn route_uses_query(op: &OperationInfo, schemes: &[SchemeInfo]) -> bool {
+    !op.query_params.is_empty() || !collect_auth_query_keys(op, schemes).is_empty()
+}
+
+/// Emit the shared query-parsing helpers, but only the ones some route uses.
+///
+/// `__parse_query` decodes the raw query into `(name, value)` pairs;
+/// `__query_de` converts a single decoded string into a typed value, trying a
+/// bare JSON parse first (numbers/bools) and falling back to a JSON string
+/// (plain strings, enums, dates, uuids).
+fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> TokenStream {
+    let needs_parse = ops.iter().any(|op| route_uses_query(op, schemes));
+    if !needs_parse {
+        return quote! {};
+    }
+    let needs_de = ops.iter().any(|op| !op.query_params.is_empty());
+
+    let parse = quote! {
+        fn __parse_query(
+            raw: &::core::option::Option<::std::string::String>,
+        ) -> ::std::vec::Vec<(::std::string::String, ::std::string::String)> {
+            match raw {
+                ::core::option::Option::Some(q) => {
+                    ::openapi_trait::form_urlencoded::parse(q.as_bytes())
+                        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                        .collect()
+                }
+                ::core::option::Option::None => ::std::vec::Vec::new(),
+            }
+        }
+    };
+
+    let de = if needs_de {
+        quote! {
+            fn __query_de<T: ::serde::de::DeserializeOwned>(raw: &str) -> ::core::option::Option<T> {
+                if let ::core::result::Result::Ok(value) = ::serde_json::from_str::<T>(raw) {
+                    return ::core::option::Option::Some(value);
+                }
+                let quoted = ::serde_json::Value::String(raw.to_string()).to_string();
+                ::serde_json::from_str::<T>(&quoted).ok()
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        #parse
+        #de
     }
 }
 
@@ -171,27 +242,18 @@ fn status_code_ident(n: u16) -> proc_macro2::Ident {
     format_ident!("{}", name)
 }
 
-/// Generate the query-params struct and route call for one operation.
-fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, TokenStream) {
+/// Generate the route call for one operation.
+fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let method_ident = &op.method_ident;
     let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let path = &op.path;
     let routing_method = format_ident!("{}", op.method);
 
     let alts = resolve_alternatives(&op.auth, schemes);
-    let auth_query_keys: Vec<&str> = alts
-        .iter()
-        .filter_map(|s| match &s.kind {
-            SchemeKind::ApiKey {
-                key,
-                location: ApiKeyIn::Query,
-            } => Some(key.as_str()),
-            _ => None,
-        })
-        .collect();
+    let auth_query_keys = collect_auth_query_keys(op, schemes);
 
     let (path_extractor, path_fields) = build_path_extractor(&op.path_params);
-    let (query_struct, query_extractor, query_fields) = build_query_extractor(op, &auth_query_keys);
+    let (query_extractor, query_stmts, query_fields) = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
     // Extract spec-defined header params from the HeaderMap. Required headers are
@@ -252,13 +314,14 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
 
     let (auth_extract, auth_call_arg) = build_auth_extractor(op, &alts);
 
-    let route_call = quote! {
+    quote! {
         .route(#path, ::axum::routing::#routing_method({
             let __api = __api.clone();
             move |#(#closure_params),*| {
                 let __api = __api.clone();
                 async move {
                     use ::axum::response::IntoResponse as _;
+                    #(#query_stmts)*
                     #auth_extract
                     #(#header_stmts)*
                     let req = #req_ident { #(#req_fields)* };
@@ -269,9 +332,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> (TokenStream, T
                 }
             }
         }))
-    };
-
-    (query_struct, route_call)
+    }
 }
 
 /// Build the auth extraction block + the call-site argument for an operation.
@@ -357,9 +418,10 @@ fn extract_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
             key,
             location: ApiKeyIn::Query,
         } => {
+            // Bound as a local `Option<String>` by the query extractor.
             let field = format_ident!("__auth_query_{}", key.to_snake_case());
             quote! {
-                query_params.#field.clone().map(#ident)
+                #field.clone().map(#ident)
             }
         }
         SchemeKind::HttpBearer => quote! {
@@ -423,75 +485,185 @@ fn build_path_extractor(params: &[ParamInfo]) -> (Option<TokenStream>, Vec<Token
     (Some(extractor), inits)
 }
 
-/// Returns (optional query struct definition, optional extractor param, vec of field init tokens
-/// for the Request struct — auth fields are NOT included here since they're consumed by the
-/// auth extractor).
+/// Build the query handling for an operation.
+///
+/// Returns `(extractor param, binding statements, request-field inits)`. The
+/// statements parse the raw query into typed locals (honoring each param's
+/// `style`/`explode`) and bind any auth-query credentials; the inits move those
+/// locals into the request struct via field shorthand. Auth fields are consumed
+/// by the auth extractor, so they are not part of the inits.
 fn build_query_extractor(
     op: &OperationInfo,
     auth_query_keys: &[&str],
-) -> (TokenStream, Option<TokenStream>, Vec<TokenStream>) {
+) -> (Option<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
     if op.query_params.is_empty() && auth_query_keys.is_empty() {
-        return (quote! {}, None, vec![]);
+        return (None, vec![], vec![]);
     }
 
-    let struct_ident = format_ident!("{}QueryParams", op.operation_id.to_pascal_case());
+    let extractor = quote! {
+        ::axum::extract::RawQuery(__raw_query): ::axum::extract::RawQuery
+    };
 
-    let mut struct_fields: Vec<TokenStream> = op
-        .query_params
-        .iter()
-        .map(|p| {
-            let field_ident = &p.field_ident;
-            let rename_attr = if *field_ident == p.name.as_str() {
-                quote! {}
-            } else {
-                let n = &p.name;
-                quote! { #[serde(rename = #n)] }
-            };
-            let inner = &p.rust_type;
-            let ftype = if p.required {
-                quote! { #inner }
-            } else {
-                quote! { ::core::option::Option<#inner> }
-            };
-            quote! {
-                #rename_attr
-                pub #field_ident: #ftype,
-            }
-        })
-        .collect();
+    let mut stmts: Vec<TokenStream> = vec![quote! {
+        let __pairs = __parse_query(&__raw_query);
+    }];
+    stmts.extend(op.query_params.iter().map(query_param_binding));
 
     for key in auth_query_keys {
         let field_ident = format_ident!("__auth_query_{}", key.to_snake_case());
         let raw = *key;
-        struct_fields.push(quote! {
-            #[serde(rename = #raw, default)]
-            pub #field_ident: ::core::option::Option<::std::string::String>,
+        stmts.push(quote! {
+            let #field_ident: ::core::option::Option<::std::string::String> = __pairs
+                .iter()
+                .rev()
+                .find(|(k, _)| k == #raw)
+                .map(|(_, v)| v.clone());
         });
     }
-
-    let query_struct = quote! {
-        #[derive(::serde::Deserialize)]
-
-        struct #struct_ident {
-            #(#struct_fields)*
-        }
-    };
-
-    let extractor = quote! {
-        ::axum::extract::Query(query_params):
-            ::axum::extract::Query<#struct_ident>
-    };
 
     let inits: Vec<TokenStream> = op
         .query_params
         .iter()
         .map(|p| {
             let field_ident = &p.field_ident;
-            quote! { #field_ident: query_params.#field_ident, }
+            quote! { #field_ident, }
         })
         .collect();
 
-    (query_struct, Some(extractor), inits)
+    (Some(extractor), stmts, inits)
+}
+
+/// Emit the statement binding one query parameter to a typed local, parsing it
+/// out of `__pairs` per the param's `style`/`explode`. Required params that are
+/// missing or fail to parse return `400 Bad Request`.
+fn query_param_binding(param: &ParamInfo) -> TokenStream {
+    if param.query.is_array {
+        array_query_binding(param)
+    } else {
+        scalar_query_binding(param)
+    }
+}
+
+/// An expression yielding `Option<&str>` for the last query pair named `name`.
+fn last_query_value(name: &str) -> TokenStream {
+    quote! {
+        __pairs.iter().rev().find(|(k, _)| k == #name).map(|(_, v)| v.as_str())
+    }
+}
+
+/// A `return 400` statement for a malformed value of the named parameter.
+fn invalid_query_param(name: &str) -> TokenStream {
+    quote! {
+        let msg = ::std::format!("invalid query parameter `{}`", #name);
+        return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+    }
+}
+
+/// Bind an array query parameter, honoring `explode` (repeated keys) vs. the
+/// delimited single-value form.
+fn array_query_binding(param: &ParamInfo) -> TokenStream {
+    let field_ident = &param.field_ident;
+    let name = &param.name;
+    let item_ty = param
+        .query
+        .array_item_type
+        .clone()
+        .unwrap_or_else(|| quote! { ::serde_json::Value });
+    let bad_element = invalid_query_param(name);
+
+    if param.query.explode {
+        // One repeated key per element.
+        let build = quote! {
+            let mut __acc: ::std::vec::Vec<#item_ty> = ::std::vec::Vec::new();
+            for (__k, __v) in &__pairs {
+                if __k == #name {
+                    match __query_de::<#item_ty>(__v) {
+                        ::core::option::Option::Some(__el) => __acc.push(__el),
+                        ::core::option::Option::None => { #bad_element }
+                    }
+                }
+            }
+        };
+        if param.required {
+            quote! { let #field_ident = { #build __acc }; }
+        } else {
+            quote! {
+                let #field_ident = {
+                    #build
+                    if __acc.is_empty() {
+                        ::core::option::Option::None
+                    } else {
+                        ::core::option::Option::Some(__acc)
+                    }
+                };
+            }
+        }
+    } else {
+        // A single delimited value.
+        let delim = param.query.style.delimiter();
+        let parse_value = quote! {
+            let mut __acc: ::std::vec::Vec<#item_ty> = ::std::vec::Vec::new();
+            if !__raw.is_empty() {
+                for __part in __raw.split(#delim) {
+                    match __query_de::<#item_ty>(__part) {
+                        ::core::option::Option::Some(__el) => __acc.push(__el),
+                        ::core::option::Option::None => { #bad_element }
+                    }
+                }
+            }
+        };
+        let found = last_query_value(name);
+        if param.required {
+            quote! {
+                let #field_ident = match #found {
+                    ::core::option::Option::Some(__raw) => { #parse_value __acc },
+                    ::core::option::Option::None => ::std::vec::Vec::new(),
+                };
+            }
+        } else {
+            quote! {
+                let #field_ident = match #found {
+                    ::core::option::Option::Some(__raw) => { #parse_value ::core::option::Option::Some(__acc) },
+                    ::core::option::Option::None => ::core::option::Option::None,
+                };
+            }
+        }
+    }
+}
+
+/// Bind a scalar query parameter (also the object/deepObject fallback): a single
+/// value round-tripped through `__query_de`.
+fn scalar_query_binding(param: &ParamInfo) -> TokenStream {
+    let field_ident = &param.field_ident;
+    let name = &param.name;
+    let ty = &param.rust_type;
+    let found = last_query_value(name);
+    let invalid = invalid_query_param(name);
+
+    if param.required {
+        quote! {
+            let #field_ident = match #found {
+                ::core::option::Option::Some(__raw) => match __query_de::<#ty>(__raw) {
+                    ::core::option::Option::Some(__v) => __v,
+                    ::core::option::Option::None => { #invalid }
+                },
+                ::core::option::Option::None => {
+                    let msg = ::std::format!("missing required query parameter `{}`", #name);
+                    return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+                }
+            };
+        }
+    } else {
+        quote! {
+            let #field_ident = match #found {
+                ::core::option::Option::Some(__raw) => match __query_de::<#ty>(__raw) {
+                    ::core::option::Option::Some(__v) => ::core::option::Option::Some(__v),
+                    ::core::option::Option::None => { #invalid }
+                },
+                ::core::option::Option::None => ::core::option::Option::None,
+            };
+        }
+    }
 }
 
 /// Build the body extractor param and field init for an operation.

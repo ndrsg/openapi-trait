@@ -44,6 +44,19 @@ pub fn generate_reqwest_impl(
             .to_string()
         }
 
+        // Render a single query-parameter value to its raw (unencoded) wire
+        // string. Serializing through `serde_json` honors `#[serde(rename)]` on
+        // enum variants and the string encodings of dates/uuids; reqwest then
+        // percent-encodes as it assembles the URL.
+        fn query_value(value: &impl ::serde::Serialize) -> ::std::string::String {
+            match ::serde_json::to_value(value) {
+                ::core::result::Result::Ok(::serde_json::Value::String(s)) => s,
+                ::core::result::Result::Ok(::serde_json::Value::Null) => ::std::string::String::new(),
+                ::core::result::Result::Ok(other) => other.to_string(),
+                ::core::result::Result::Err(_) => ::std::string::String::new(),
+            }
+        }
+
         impl<T> #trait_name for T
         where
             #impl_bound
@@ -251,7 +264,6 @@ fn generate_impl_method(
         })
         .collect();
 
-    let query_struct = generate_query_struct(op);
     let query_builder = generate_query_builder(op);
     let header_builder = generate_header_builder(op);
     let body_builder = generate_body_builder(op);
@@ -286,7 +298,6 @@ fn generate_impl_method(
                 let url = format!("{}{}", base_url.trim_end_matches('/'), path);
                 let mut request = client.#http_method(url);
 
-                #query_struct
                 #query_builder
                 #header_builder
                 #body_builder
@@ -498,69 +509,75 @@ fn generate_response_match(
     (response_arms, fallback)
 }
 
-/// Generate a serializable helper struct for query parameters.
-fn generate_query_struct(op: &OperationInfo) -> TokenStream {
-    if op.query_params.is_empty() {
-        return quote! {};
-    }
-
-    let struct_ident = format_ident!("{}ReqwestQuery", op.operation_id.to_pascal_case());
-    let fields: Vec<TokenStream> = op
-        .query_params
-        .iter()
-        .map(generate_query_struct_field)
-        .collect();
-
-    quote! {
-        #[derive(::serde::Serialize)]
-        struct #struct_ident<'a> {
-            #(#fields)*
-        }
-    }
-}
-
-/// Generate one field for the reqwest query helper struct.
-fn generate_query_struct_field(param: &ParamInfo) -> TokenStream {
-    let field_ident = &param.field_ident;
-    let ty = &param.rust_type;
-    let field_type = if param.required {
-        quote! { &'a #ty }
-    } else {
-        quote! { &'a ::core::option::Option<#ty> }
-    };
-    let rename = &param.name;
-    let skip_attr = if param.required {
-        quote! {}
-    } else {
-        quote! { #[serde(skip_serializing_if = "::core::option::Option::is_none")] }
-    };
-
-    quote! {
-        #[serde(rename = #rename)]
-        #skip_attr
-        #field_ident: #field_type,
-    }
-}
-
 /// Generate the reqwest query population code for an operation.
+///
+/// Builds a `Vec<(String, String)>` of raw query pairs, honoring each param's
+/// `style`/`explode`, then hands it to reqwest (which percent-encodes as it
+/// assembles the URL).
 fn generate_query_builder(op: &OperationInfo) -> TokenStream {
     if op.query_params.is_empty() {
         return quote! {};
     }
 
-    let struct_ident = format_ident!("{}ReqwestQuery", op.operation_id.to_pascal_case());
-    let fields: Vec<TokenStream> = op
-        .query_params
-        .iter()
-        .map(|param| {
-            let field_ident = &param.field_ident;
-            quote! { #field_ident: &#field_ident, }
-        })
-        .collect();
+    let pushes: Vec<TokenStream> = op.query_params.iter().map(query_param_push).collect();
 
     quote! {
-        let query = #struct_ident { #(#fields)* };
-        request = request.query(&query);
+        let mut __query: ::std::vec::Vec<(::std::string::String, ::std::string::String)> =
+            ::std::vec::Vec::new();
+        #(#pushes)*
+        request = request.query(&__query);
+    }
+}
+
+/// Emit the code appending one query parameter's pairs to `__query`.
+///
+/// Scalars become a single `name=value`. Exploded arrays repeat the key once per
+/// element; non-exploded arrays join their elements with the style delimiter
+/// (`,`/` `/`|`). Object/`deepObject` params fall through the scalar branch and
+/// serialize to a single JSON value (the warned-about fallback).
+fn query_param_push(param: &ParamInfo) -> TokenStream {
+    let field_ident = &param.field_ident;
+    let name = &param.name;
+
+    if param.query.is_array {
+        let delim = param.query.style.delimiter();
+        let append = if param.query.explode {
+            quote! {
+                for __item in __items {
+                    __query.push((#name.to_string(), query_value(__item)));
+                }
+            }
+        } else {
+            quote! {
+                if !__items.is_empty() {
+                    let __joined = __items
+                        .iter()
+                        .map(query_value)
+                        .collect::<::std::vec::Vec<_>>()
+                        .join(#delim);
+                    __query.push((#name.to_string(), __joined));
+                }
+            }
+        };
+        if param.required {
+            quote! {
+                { let __items = &#field_ident; #append }
+            }
+        } else {
+            quote! {
+                if let ::core::option::Option::Some(__items) = &#field_ident { #append }
+            }
+        }
+    } else if param.required {
+        quote! {
+            __query.push((#name.to_string(), query_value(&#field_ident)));
+        }
+    } else {
+        quote! {
+            if let ::core::option::Option::Some(__value) = &#field_ident {
+                __query.push((#name.to_string(), query_value(__value)));
+            }
+        }
     }
 }
 
