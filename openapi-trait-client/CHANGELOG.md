@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.7](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-client-v0.0.6...openapi-trait-client-v0.0.7) - 2026-07-02
+
+### Added
+
+- add optional validation support
+
 ## [0.0.6](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-client-v0.0.5...openapi-trait-client-v0.0.6) - 2026-06-26
 
 ### Fixed
