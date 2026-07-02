@@ -17,8 +17,7 @@ pub fn generate_router(
 
     let into_response_impls: Vec<TokenStream> =
         ops.iter().map(generate_into_response_impl).collect();
-    let route_calls: Vec<TokenStream> =
-        ops.iter().map(|op| generate_route(op, schemes)).collect();
+    let route_calls: Vec<TokenStream> = ops.iter().map(|op| generate_route(op, schemes)).collect();
 
     let auth_helpers = generate_auth_helpers(schemes);
     let query_helpers = generate_query_helpers(ops, schemes);

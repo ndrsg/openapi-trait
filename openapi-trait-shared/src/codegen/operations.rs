@@ -1089,7 +1089,10 @@ paths:
         assert_eq!(q[0].query.style, QueryStyleKind::Form);
         assert!(q[0].query.explode, "form defaults explode to true");
         assert_eq!(q[1].query.style, QueryStyleKind::Pipe);
-        assert!(!q[1].query.explode, "non-form styles default explode to false");
+        assert!(
+            !q[1].query.explode,
+            "non-form styles default explode to false"
+        );
     }
 
     #[test]

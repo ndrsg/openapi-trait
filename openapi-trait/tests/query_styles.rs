@@ -77,15 +77,17 @@ async fn client_serializes_query_styles() {
     let sink = captured.clone();
     let app = axum::Router::new().route(
         "/items",
-        axum::routing::get(move |axum::extract::RawQuery(raw): axum::extract::RawQuery| {
-            let sink = sink.clone();
-            async move {
-                *sink.lock().unwrap() = raw;
-                axum::Json(serde_json::json!({
-                    "tag": [], "csv": [], "space": [], "pipe": [], "ids": []
-                }))
-            }
-        }),
+        axum::routing::get(
+            move |axum::extract::RawQuery(raw): axum::extract::RawQuery| {
+                let sink = sink.clone();
+                async move {
+                    *sink.lock().unwrap() = raw;
+                    axum::Json(serde_json::json!({
+                        "tag": [], "csv": [], "space": [], "pipe": [], "ids": []
+                    }))
+                }
+            },
+        ),
     );
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
@@ -110,9 +112,8 @@ async fn client_serializes_query_styles() {
 #[tokio::test]
 async fn server_parses_query_styles() {
     let base_url = spawn_echo_server().await;
-    let url = format!(
-        "{base_url}/items?tag=a&tag=b&csv=x%2Cy&space=m%20n&pipe=p%7Cq&ids=1%2C2&q=hi"
-    );
+    let url =
+        format!("{base_url}/items?tag=a&tag=b&csv=x%2Cy&space=m%20n&pipe=p%7Cq&ids=1%2C2&q=hi");
 
     let body: serde_json::Value = openapi_trait::reqwest::Client::new()
         .get(url)
@@ -163,15 +164,17 @@ async fn empty_optional_params_are_absent() {
     let sink = captured.clone();
     let app = axum::Router::new().route(
         "/items",
-        axum::routing::get(move |axum::extract::RawQuery(raw): axum::extract::RawQuery| {
-            let sink = sink.clone();
-            async move {
-                *sink.lock().unwrap() = raw;
-                axum::Json(serde_json::json!({
-                    "tag": [], "csv": [], "space": [], "pipe": [], "ids": []
-                }))
-            }
-        }),
+        axum::routing::get(
+            move |axum::extract::RawQuery(raw): axum::extract::RawQuery| {
+                let sink = sink.clone();
+                async move {
+                    *sink.lock().unwrap() = raw;
+                    axum::Json(serde_json::json!({
+                        "tag": [], "csv": [], "space": [], "pipe": [], "ids": []
+                    }))
+                }
+            },
+        ),
     );
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
