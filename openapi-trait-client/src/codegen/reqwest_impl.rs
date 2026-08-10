@@ -2,7 +2,10 @@ use heck::ToPascalCase;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use openapi_trait_shared::codegen::operations::{OperationInfo, ParamInfo, ResponseStatus};
+use openapi_trait_shared::codegen::operations::{
+    response_payload_ident, BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo,
+    ResponseHeaderInfo, ResponseStatus,
+};
 use openapi_trait_shared::codegen::security::{
     auth_state_ident, client_auth_trait_ident, resolve_alternatives, scheme_field_ident, ApiKeyIn,
     SchemeInfo, SchemeKind,
@@ -94,6 +97,11 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
                 operation: &'static str,
                 scheme: &'static str,
             },
+            InvalidResponseHeader {
+                operation: &'static str,
+                header: &'static str,
+                reason: &'static str,
+            },
             UnexpectedStatus {
                 operation: &'static str,
                 status: ::openapi_trait::reqwest::StatusCode,
@@ -108,6 +116,10 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
                     Self::MissingCredential { operation, scheme } => {
                         write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
                     }
+                    Self::InvalidResponseHeader { operation, header, reason } => write!(
+                        formatter,
+                        "invalid response header `{header}` on `{operation}`: {reason}"
+                    ),
                     Self::UnexpectedStatus { operation, status, body } => write!(
                         formatter,
                         "unexpected status {status} for `{operation}`: {body}"
@@ -121,6 +133,7 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
                 match self {
                     Self::Transport(error) => ::core::option::Option::Some(error),
                     Self::MissingCredential { .. }
+                    | Self::InvalidResponseHeader { .. }
                     | Self::UnexpectedStatus { .. } => ::core::option::Option::None,
                 }
             }
@@ -462,21 +475,40 @@ fn generate_response_match(
         .filter_map(|response| match response.status {
             ResponseStatus::Code(code) => {
                 let variant_ident = format_ident!("Status{}", code);
-                Some(response.rust_type.as_ref().map_or_else(
-                    || {
-                        quote! {
-                            #code => ::core::result::Result::Ok(#resp_ident::#variant_ident),
-                        }
-                    },
-                    |_| {
-                        quote! {
-                            #code => {
-                                let body = response.json().await.map_err(#error_name::Transport)?;
-                                ::core::result::Result::Ok(#resp_ident::#variant_ident(body))
+                Some(if !response.headers.is_empty() {
+                    generate_payload_response_arm(
+                        op,
+                        response,
+                        code,
+                        error_name,
+                        resp_ident,
+                        &variant_ident,
+                    )
+                } else if response.rust_type.is_some() {
+                    match response.encoding.as_ref() {
+                        Some(BodyEncoding::Bytes { .. }) => {
+                            quote! {
+                                #code => {
+                                    ::core::result::Result::Ok(#resp_ident::#variant_ident(
+                                        ::openapi_trait::ByteStream::from_reqwest(response),
+                                    ))
+                                }
                             }
                         }
-                    },
-                ))
+                        _ => {
+                            quote! {
+                                #code => {
+                                    let body = response.json().await.map_err(#error_name::Transport)?;
+                                    ::core::result::Result::Ok(#resp_ident::#variant_ident(body))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    quote! {
+                        #code => ::core::result::Result::Ok(#resp_ident::#variant_ident),
+                    }
+                })
             }
             ResponseStatus::Default => None,
         })
@@ -507,6 +539,172 @@ fn generate_response_match(
     };
 
     (response_arms, fallback)
+}
+
+/// Generate a response match arm for a variant with a headers payload struct.
+fn generate_payload_response_arm(
+    op: &OperationInfo,
+    response: &openapi_trait_shared::codegen::operations::ResponseInfo,
+    code: u16,
+    error_name: &proc_macro2::Ident,
+    resp_ident: &proc_macro2::Ident,
+    variant_ident: &proc_macro2::Ident,
+) -> TokenStream {
+    let payload_ident = response_payload_ident(&op.operation_id, code);
+
+    let header_reads: Vec<TokenStream> = response
+        .headers
+        .iter()
+        .map(|h| generate_response_header_read(h, error_name, &op.operation_id))
+        .collect();
+
+    let header_fields: Vec<TokenStream> = response
+        .headers
+        .iter()
+        .map(|h| {
+            let field_ident = &h.field_ident;
+            quote! { #field_ident, }
+        })
+        .collect();
+
+    let body_field = if response.rust_type.is_some() {
+        quote! { body, }
+    } else {
+        quote! {}
+    };
+
+    // Headers must be read before the body consumes the response.
+    let body_read = match (&response.rust_type, &response.encoding) {
+        (Some(_), Some(BodyEncoding::Bytes { .. })) => quote! {
+            let body = ::openapi_trait::ByteStream::from_reqwest(response);
+        },
+        (Some(_), _) => quote! {
+            let body = response.json().await.map_err(#error_name::Transport)?;
+        },
+        (None, _) => quote! {},
+    };
+
+    quote! {
+        #code => {
+            #(#header_reads)*
+            #body_read
+            ::core::result::Result::Ok(#resp_ident::#variant_ident(#payload_ident {
+                #body_field
+                #(#header_fields)*
+            }))
+        }
+    }
+}
+
+/// Emit code that reads one declared response header from a reqwest response.
+fn generate_response_header_read(
+    header: &ResponseHeaderInfo,
+    error_name: &proc_macro2::Ident,
+    operation_name: &str,
+) -> TokenStream {
+    let field_ident = &header.field_ident;
+    let header_name = &header.name;
+    let op_name = operation_name;
+
+    let missing = quote! {
+        ::core::result::Result::Err(#error_name::InvalidResponseHeader {
+            operation: #op_name,
+            header: #header_name,
+            reason: "missing required response header",
+        })?
+    };
+
+    let parse_expr = match header.value_kind {
+        HeaderValueKind::String => {
+            if header.required {
+                quote! {
+                    match response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(::std::string::String::from)
+                    {
+                        ::core::option::Option::Some(v) => ::core::result::Result::Ok(v),
+                        ::core::option::Option::None => #missing,
+                    }?
+                }
+            } else {
+                quote! {
+                    response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .map(::std::string::String::from)
+                }
+            }
+        }
+        HeaderValueKind::Integer => {
+            if header.required {
+                quote! {
+                    match response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        ::core::option::Option::Some(raw) => raw.parse().map_err(|_| {
+                            #error_name::InvalidResponseHeader {
+                                operation: #op_name,
+                                header: #header_name,
+                                reason: "invalid integer response header",
+                            }
+                        })?,
+                        ::core::option::Option::None => #missing,
+                    }
+                }
+            } else {
+                quote! {
+                    response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|raw| raw.parse().ok())
+                }
+            }
+        }
+        HeaderValueKind::DateTime => {
+            if header.required {
+                quote! {
+                    match response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                    {
+                        ::core::option::Option::Some(raw) => {
+                            ::openapi_trait::chrono::DateTime::parse_from_rfc3339(raw)
+                                .map(|dt| dt.with_timezone(&::openapi_trait::chrono::Utc))
+                                .map_err(|_| #error_name::InvalidResponseHeader {
+                                    operation: #op_name,
+                                    header: #header_name,
+                                    reason: "invalid date-time response header",
+                                })?
+                        }
+                        ::core::option::Option::None => #missing,
+                    }
+                }
+            } else {
+                quote! {
+                    response
+                        .headers()
+                        .get(#header_name)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|raw| {
+                            ::openapi_trait::chrono::DateTime::parse_from_rfc3339(raw)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&::openapi_trait::chrono::Utc))
+                        })
+                }
+            }
+        }
+    };
+
+    quote! {
+        let #field_ident = #parse_expr;
+    }
 }
 
 /// Generate the reqwest query population code for an operation.
@@ -610,14 +808,40 @@ fn generate_header_builder(op: &OperationInfo) -> TokenStream {
 }
 
 /// Generate the reqwest request body population code for an operation.
+#[allow(clippy::option_if_let_else)]
 fn generate_body_builder(op: &OperationInfo) -> TokenStream {
     match op.body {
-        Some(ref body) if body.required => quote! {
-            request = request.json(&body);
-        },
-        Some(_) => quote! {
-            if let ::core::option::Option::Some(body) = body {
-                request = request.json(&body);
+        Some(ref body) => match &body.encoding {
+            BodyEncoding::Bytes { content_type } => {
+                let ct = content_type.as_str();
+                if body.required {
+                    quote! {
+                        request = request
+                            .header(::openapi_trait::reqwest::header::CONTENT_TYPE, #ct)
+                            .body(body);
+                    }
+                } else {
+                    quote! {
+                        if let ::core::option::Option::Some(body) = body {
+                            request = request
+                                .header(::openapi_trait::reqwest::header::CONTENT_TYPE, #ct)
+                                .body(body);
+                        }
+                    }
+                }
+            }
+            BodyEncoding::Json => {
+                if body.required {
+                    quote! {
+                        request = request.json(&body);
+                    }
+                } else {
+                    quote! {
+                        if let ::core::option::Option::Some(body) = body {
+                            request = request.json(&body);
+                        }
+                    }
+                }
             }
         },
         None => quote! {},

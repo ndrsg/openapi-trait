@@ -9,7 +9,9 @@ use quote::quote;
 
 use api_trait::generate_trait;
 use openapi_trait_shared::codegen::{
-    operations::{collect_operations, generate_operation_errors, generate_operation_types},
+    operations::{
+        collect_operations, generate_operation_errors, generate_operation_types, BinaryBodyTypes,
+    },
     schemas::generate_schemas,
     security::{
         collect_schemes, generate_op_auth_enum, generate_scheme_types, resolve_alternatives,
@@ -24,7 +26,13 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes);
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
-    let op_types = generate_operation_types(&ops);
+    let op_types = generate_operation_types(
+        &ops,
+        &BinaryBodyTypes {
+            request: quote!(::axum::body::Body),
+            response: quote!(::axum::body::Body),
+        },
+    );
 
     let auth_types = generate_scheme_types(&auth_schemes);
     let op_auth_enums: Vec<TokenStream> = ops

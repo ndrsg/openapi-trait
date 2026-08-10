@@ -1,7 +1,8 @@
 use heck::ToPascalCase;
 use openapiv3::{
-    MediaType, OpenAPI, Operation, Parameter, PathItem, QueryStyle, ReferenceOr, RequestBody,
-    Response, Responses, Schema, SchemaKind, StatusCode, Type,
+    Header, MediaType, OpenAPI, Operation, Parameter, ParameterSchemaOrContent, PathItem,
+    QueryStyle, ReferenceOr, RequestBody, Response, Responses, Schema, SchemaKind, StatusCode,
+    StringFormat, Type, VariantOrUnknownOrEmpty,
 };
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -99,11 +100,37 @@ pub struct ParamInfo {
     pub query: QuerySerialization,
 }
 
+/// How a request/response body is encoded on the wire.
+#[derive(Debug, Clone)]
+pub enum BodyEncoding {
+    Json,
+    Bytes { content_type: String },
+}
+
 #[derive(Debug)]
 pub struct BodyInfo {
     pub description: Option<String>,
     pub required: bool,
     pub rust_type: TokenStream,
+    pub encoding: BodyEncoding,
+}
+
+/// How a declared response header value is formatted on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeaderValueKind {
+    String,
+    Integer,
+    DateTime,
+}
+
+#[derive(Debug)]
+pub struct ResponseHeaderInfo {
+    pub name: String,
+    pub field_ident: syn::Ident,
+    pub description: Option<String>,
+    pub required: bool,
+    pub rust_type: TokenStream,
+    pub value_kind: HeaderValueKind,
 }
 
 #[derive(Debug)]
@@ -111,6 +138,65 @@ pub struct ResponseInfo {
     pub status: ResponseStatus,
     pub description: String,
     pub rust_type: Option<TokenStream>,
+    pub encoding: Option<BodyEncoding>,
+    pub headers: Vec<ResponseHeaderInfo>,
+}
+
+/// Rust types used for binary request/response bodies in generated operation types.
+///
+/// Axum and the reqwest client pass different concrete stream/body types while
+/// sharing the same `OpenAPI` metadata.
+#[derive(Debug)]
+pub struct BinaryBodyTypes {
+    /// Type for binary request bodies (e.g. `axum::body::Body`).
+    pub request: TokenStream,
+    /// Type for binary response bodies (e.g. `axum::body::Body` or `ByteStream`).
+    pub response: TokenStream,
+}
+
+/// True when the operation has a binary-encoded request body.
+fn op_has_binary_request_body(op: &OperationInfo) -> bool {
+    op.body
+        .as_ref()
+        .is_some_and(|b| matches!(b.encoding, BodyEncoding::Bytes { .. }))
+}
+
+/// True when any response variant carries a binary-encoded body.
+fn op_has_binary_response_body(op: &OperationInfo) -> bool {
+    op.responses
+        .iter()
+        .any(|r| r.rust_type.is_some() && matches!(r.encoding, Some(BodyEncoding::Bytes { .. })))
+}
+
+/// Resolve the Rust type for a request body field.
+fn request_body_field_type(body: &BodyInfo, binary: &BinaryBodyTypes) -> TokenStream {
+    let inner = match &body.encoding {
+        BodyEncoding::Bytes { .. } => binary.request.clone(),
+        BodyEncoding::Json => body.rust_type.clone(),
+    };
+    if body.required {
+        inner
+    } else {
+        quote! { ::core::option::Option<#inner> }
+    }
+}
+
+/// Resolve the Rust type for a binary or JSON response body.
+fn response_body_type(r: &ResponseInfo, binary: &BinaryBodyTypes) -> Option<TokenStream> {
+    r.rust_type.as_ref().map(|_| match &r.encoding {
+        Some(BodyEncoding::Bytes { .. }) => binary.response.clone(),
+        _ => r.rust_type.clone().unwrap(),
+    })
+}
+
+/// Ident for a response payload struct when an operation declares response headers.
+#[must_use]
+pub fn response_payload_ident(operation_id: &str, status: u16) -> syn::Ident {
+    format_ident!(
+        "{}{}",
+        operation_id.to_pascal_case(),
+        format!("Status{status}")
+    )
 }
 
 #[derive(Debug)]
@@ -485,25 +571,213 @@ fn build_body_info(ref_or_rb: &ReferenceOr<RequestBody>, openapi: &OpenAPI) -> O
         }
     };
 
-    let rust_type = json_media_type_to_rust(&rb.content, openapi)?;
+    let resolved = media_type_to_rust(&rb.content, openapi)?;
 
     Some(BodyInfo {
         description: rb.description.clone(),
         required: rb.required,
-        rust_type,
+        rust_type: resolved.rust_type,
+        encoding: resolved.encoding,
     })
 }
 
-/// Extract the Rust type from a JSON media type content map.
-fn json_media_type_to_rust(
+/// Resolved Rust type and wire encoding for a media-type content map entry.
+struct MediaTypeResolved {
+    /// Generated Rust type for the body payload.
+    rust_type: TokenStream,
+    /// How the body is encoded on the wire.
+    encoding: BodyEncoding,
+}
+
+/// True when the content type represents a binary payload.
+fn is_binary_media_type(content_type: &str) -> bool {
+    content_type == "application/octet-stream"
+        || content_type.starts_with("image/")
+        || content_type.starts_with("audio/")
+        || content_type.starts_with("video/")
+        || content_type == "application/pdf"
+        || content_type == "application/zip"
+}
+
+/// True when a schema is `type: string, format: binary`.
+const fn schema_is_binary(ref_or: &ReferenceOr<Schema>) -> bool {
+    match ref_or {
+        ReferenceOr::Item(schema) => matches!(
+            &schema.schema_kind,
+            SchemaKind::Type(Type::String(s)) if matches!(
+                s.format,
+                VariantOrUnknownOrEmpty::Item(StringFormat::Binary)
+            )
+        ),
+        ReferenceOr::Reference { .. } => false,
+    }
+}
+
+/// Resolve the Rust type and wire encoding from a content map.
+fn media_type_to_rust(
     content: &indexmap::IndexMap<String, MediaType>,
     _openapi: &OpenAPI,
-) -> Option<TokenStream> {
-    let media = content
-        .get("application/json")
-        .or_else(|| content.values().next())?;
+) -> Option<MediaTypeResolved> {
+    if let Some(media) = content.get("application/json") {
+        if let Some(ref_or_schema) = media.schema.as_ref() {
+            return Some(MediaTypeResolved {
+                rust_type: schema_to_rust_type(ref_or_schema, true),
+                encoding: BodyEncoding::Json,
+            });
+        }
+    }
+
+    for (content_type, media) in content {
+        let Some(ref_or_schema) = media.schema.as_ref() else {
+            continue;
+        };
+        if is_binary_media_type(content_type) || schema_is_binary(ref_or_schema) {
+            return Some(MediaTypeResolved {
+                rust_type: quote! { ::std::vec::Vec<u8> },
+                encoding: BodyEncoding::Bytes {
+                    content_type: content_type.clone(),
+                },
+            });
+        }
+    }
+
+    // Fall back to the first entry: JSON-shaped only; binary already handled above.
+    let (content_type, media) = content.iter().next()?;
     let ref_or_schema = media.schema.as_ref()?;
-    Some(schema_to_rust_type(ref_or_schema, true))
+    if is_binary_media_type(content_type) || schema_is_binary(ref_or_schema) {
+        return Some(MediaTypeResolved {
+            rust_type: quote! { ::std::vec::Vec<u8> },
+            encoding: BodyEncoding::Bytes {
+                content_type: content_type.clone(),
+            },
+        });
+    }
+    if *content_type == "application/json" {
+        return Some(MediaTypeResolved {
+            rust_type: schema_to_rust_type(ref_or_schema, true),
+            encoding: BodyEncoding::Json,
+        });
+    }
+
+    None
+}
+
+/// Resolve media type for a response, emitting a warning for unsupported types.
+fn response_media_type_to_rust(
+    content: &indexmap::IndexMap<String, MediaType>,
+    openapi: &OpenAPI,
+    op_id: &str,
+    status_label: &str,
+    diag: &mut Diagnostics,
+) -> Option<MediaTypeResolved> {
+    media_type_to_rust(content, openapi).or_else(|| {
+        if !content.is_empty() {
+            diag.warn(format!(
+                "operation `{op_id}`: response {status_label} has unsupported non-JSON/non-binary content types; body typing skipped"
+            ));
+        }
+        None
+    })
+}
+
+/// Classify how a response header schema is serialized on the wire.
+const fn classify_header_schema(ref_or: &ReferenceOr<Schema>) -> HeaderValueKind {
+    match ref_or {
+        ReferenceOr::Item(schema) => match &schema.schema_kind {
+            SchemaKind::Type(Type::Integer(_)) => HeaderValueKind::Integer,
+            SchemaKind::Type(Type::String(s)) => {
+                if matches!(
+                    s.format,
+                    VariantOrUnknownOrEmpty::Item(StringFormat::DateTime)
+                ) {
+                    HeaderValueKind::DateTime
+                } else {
+                    HeaderValueKind::String
+                }
+            }
+            _ => HeaderValueKind::String,
+        },
+        ReferenceOr::Reference { .. } => HeaderValueKind::String,
+    }
+}
+
+/// Map a response header schema to its Rust type.
+fn header_schema_to_rust(format: &ParameterSchemaOrContent, required: bool) -> TokenStream {
+    match format {
+        ParameterSchemaOrContent::Schema(ref_or) => schema_to_rust_type(ref_or, required),
+        ParameterSchemaOrContent::Content(_) => {
+            if required {
+                quote! { ::std::string::String }
+            } else {
+                quote! { ::core::option::Option<::std::string::String> }
+            }
+        }
+    }
+}
+
+/// Build response header metadata from a `Response` object.
+fn build_response_headers(
+    resp: &Response,
+    op_id: &str,
+    openapi: &OpenAPI,
+    diag: &mut Diagnostics,
+) -> Vec<ResponseHeaderInfo> {
+    let mut out = Vec::new();
+
+    for (name, ref_or_header) in &resp.headers {
+        // Per OpenAPI, Content-Type declared under headers is ignored.
+        if name.eq_ignore_ascii_case("content-type") {
+            continue;
+        }
+
+        let header = match ref_or_header {
+            ReferenceOr::Item(h) => h,
+            ReferenceOr::Reference { reference } => {
+                if let Some(h) = resolve_header_ref(reference, openapi) {
+                    h
+                } else {
+                    diag.warn(format!(
+                        "operation `{op_id}`: could not resolve response header $ref `{reference}`; header skipped"
+                    ));
+                    continue;
+                }
+            }
+        };
+
+        let field_ident = match idents::field_ident(name) {
+            Ok(id) => id,
+            Err(msg) => {
+                diag.error(format!(
+                    "operation `{op_id}`: response header `{name}`: {msg}"
+                ));
+                continue;
+            }
+        };
+
+        let rust_type = header_schema_to_rust(&header.format, header.required);
+
+        let value_kind = match &header.format {
+            ParameterSchemaOrContent::Schema(ref_or) => classify_header_schema(ref_or),
+            ParameterSchemaOrContent::Content(_) => HeaderValueKind::String,
+        };
+
+        out.push(ResponseHeaderInfo {
+            name: name.clone(),
+            field_ident,
+            description: header.description.clone(),
+            required: header.required,
+            rust_type,
+            value_kind,
+        });
+    }
+
+    out
+}
+
+/// Resolve a `$ref` to a header from the components section.
+fn resolve_header_ref<'a>(reference: &str, openapi: &'a OpenAPI) -> Option<&'a Header> {
+    let name = reference.strip_prefix("#/components/headers/")?;
+    openapi.components.as_ref()?.headers.get(name)?.as_item()
 }
 
 /// Build response info list from an `OpenAPI` responses object.
@@ -530,7 +804,16 @@ fn build_responses(
             }
         };
 
-        let rust_type = json_media_type_to_rust(&resp.content, openapi);
+        let headers = build_response_headers(resp, op_id, openapi, diag);
+        let media = response_media_type_to_rust(
+            &resp.content,
+            openapi,
+            op_id,
+            &format!("status `{status_code}`"),
+            diag,
+        );
+        let (rust_type, encoding) =
+            media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
 
         let status = match status_code {
             StatusCode::Code(n) => ResponseStatus::Code(*n),
@@ -546,6 +829,8 @@ fn build_responses(
             status,
             description: resp.description.clone(),
             rust_type,
+            encoding,
+            headers,
         });
     }
 
@@ -567,7 +852,9 @@ fn build_responses(
         out.push(ResponseInfo {
             status: ResponseStatus::Default,
             description: resp.description.clone(),
-            rust_type: None, // Default carries a String message
+            rust_type: None,
+            encoding: None,
+            headers: Vec::new(),
         });
     }
 
@@ -598,16 +885,19 @@ pub fn generate_operation_errors(errors: &[String]) -> TokenStream {
 
 /// Generate query-param enum types + request structs + response enums for all operations.
 #[must_use]
-pub fn generate_operation_types(ops: &[OperationInfo]) -> TokenStream {
-    let items: Vec<TokenStream> = ops.iter().map(generate_single_operation_types).collect();
+pub fn generate_operation_types(ops: &[OperationInfo], binary: &BinaryBodyTypes) -> TokenStream {
+    let items: Vec<TokenStream> = ops
+        .iter()
+        .map(|op| generate_single_operation_types(op, binary))
+        .collect();
     quote! { #(#items)* }
 }
 
 /// Generate all types for a single operation.
-fn generate_single_operation_types(op: &OperationInfo) -> TokenStream {
+fn generate_single_operation_types(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
     let query_enums = generate_query_enums(op);
-    let request_struct = generate_request_struct(op);
-    let response_enum = generate_response_enum(op);
+    let request_struct = generate_request_struct(op, binary);
+    let response_enum = generate_response_enum(op, binary);
     quote! {
         #query_enums
         #request_struct
@@ -660,9 +950,14 @@ fn generate_query_enums(op: &OperationInfo) -> TokenStream {
 }
 
 /// Generate the request struct for an operation.
-fn generate_request_struct(op: &OperationInfo) -> TokenStream {
+fn generate_request_struct(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
     let ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
     let doc = combined_doc(op.summary.as_ref(), op.description.as_ref());
+    let clone_derive = if op_has_binary_request_body(op) {
+        quote! { #[derive(::core::fmt::Debug)] }
+    } else {
+        quote! { #[derive(::core::fmt::Debug, ::core::clone::Clone)] }
+    };
 
     let mut fields: Vec<TokenStream> = Vec::new();
 
@@ -709,12 +1004,7 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
     }
 
     if let Some(body) = &op.body {
-        let inner = &body.rust_type;
-        let ftype = if body.required {
-            quote! { #inner }
-        } else {
-            quote! { ::core::option::Option<#inner> }
-        };
+        let ftype = request_body_field_type(body, binary);
         let bdoc = doc_attr(&body.description);
         fields.push(quote! {
             #bdoc
@@ -724,17 +1014,32 @@ fn generate_request_struct(op: &OperationInfo) -> TokenStream {
 
     quote! {
         #doc
-        #[derive(::core::fmt::Debug, ::core::clone::Clone)]
+        #clone_derive
         pub struct #ident {
             #(#fields)*
         }
     }
 }
 
-/// Generate the response enum for an operation.
-fn generate_response_enum(op: &OperationInfo) -> TokenStream {
+/// Generate the response enum and any payload structs for an operation.
+fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
     let ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
     let doc = combined_doc(op.summary.as_ref(), op.description.as_ref());
+    let clone_derive = if op_has_binary_response_body(op) {
+        quote! { #[derive(::core::fmt::Debug)] }
+    } else {
+        quote! { #[derive(::core::fmt::Debug, ::core::clone::Clone)] }
+    };
+
+    let payload_structs: Vec<TokenStream> = op
+        .responses
+        .iter()
+        .filter(|r| !r.headers.is_empty())
+        .filter_map(|r| match r.status {
+            ResponseStatus::Code(n) => Some(generate_response_payload_struct(op, r, n, binary)),
+            ResponseStatus::Default => None,
+        })
+        .collect();
 
     let variants: Vec<TokenStream> = op
         .responses
@@ -744,20 +1049,28 @@ fn generate_response_enum(op: &OperationInfo) -> TokenStream {
             match &r.status {
                 ResponseStatus::Code(n) => {
                     let variant_ident = format_ident!("Status{}", n);
-                    r.rust_type.as_ref().map_or_else(
-                        || {
-                            quote! {
-                                #vdoc
-                                #variant_ident
-                            }
-                        },
-                        |ty| {
-                            quote! {
-                                #vdoc
-                                #variant_ident(#ty)
-                            }
-                        },
-                    )
+                    if r.headers.is_empty() {
+                        response_body_type(r, binary).map_or_else(
+                            || {
+                                quote! {
+                                    #vdoc
+                                    #variant_ident
+                                }
+                            },
+                            |ty| {
+                                quote! {
+                                    #vdoc
+                                    #variant_ident(#ty)
+                                }
+                            },
+                        )
+                    } else {
+                        let payload_ident = response_payload_ident(&op.operation_id, *n);
+                        quote! {
+                            #vdoc
+                            #variant_ident(#payload_ident)
+                        }
+                    }
                 }
                 ResponseStatus::Default => {
                     quote! {
@@ -770,10 +1083,50 @@ fn generate_response_enum(op: &OperationInfo) -> TokenStream {
         .collect();
 
     quote! {
+        #(#payload_structs)*
         #doc
-        #[derive(::core::fmt::Debug, ::core::clone::Clone)]
+        #clone_derive
         pub enum #ident {
             #(#variants,)*
+        }
+    }
+}
+
+/// Generate a payload struct for a response that declares headers.
+fn generate_response_payload_struct(
+    op: &OperationInfo,
+    r: &ResponseInfo,
+    status: u16,
+    binary: &BinaryBodyTypes,
+) -> TokenStream {
+    let ident = response_payload_ident(&op.operation_id, status);
+    let clone_derive = if matches!(r.encoding, Some(BodyEncoding::Bytes { .. })) {
+        quote! { #[derive(::core::fmt::Debug)] }
+    } else {
+        quote! { #[derive(::core::fmt::Debug, ::core::clone::Clone)] }
+    };
+    let mut fields: Vec<TokenStream> = Vec::new();
+
+    if let Some(ty) = response_body_type(r, binary) {
+        fields.push(quote! {
+            pub body: #ty,
+        });
+    }
+
+    for h in &r.headers {
+        let field_ident = &h.field_ident;
+        let ftype = &h.rust_type;
+        let fdoc = doc_attr(&h.description);
+        fields.push(quote! {
+            #fdoc
+            pub #field_ident: #ftype,
+        });
+    }
+
+    quote! {
+        #clone_derive
+        pub struct #ident {
+            #(#fields)*
         }
     }
 }
@@ -796,6 +1149,13 @@ mod tests {
     fn collect(spec: &str) -> (Vec<OperationInfo>, Diagnostics) {
         let openapi: OpenAPI = serde_yaml::from_str(spec).expect("spec parses");
         collect_operations(&openapi, &[])
+    }
+
+    fn test_binary_types() -> BinaryBodyTypes {
+        BinaryBodyTypes {
+            request: quote!(::TestRequestBody),
+            response: quote!(::TestResponseBody),
+        }
     }
 
     #[test]
@@ -1007,7 +1367,7 @@ paths:
         assert!(diag.errors.is_empty(), "{:?}", diag.errors);
         assert_eq!(ops[0].header_params.len(), 2);
 
-        let struct_src = generate_request_struct(&ops[0]).to_string();
+        let struct_src = generate_request_struct(&ops[0], &test_binary_types()).to_string();
         // The required header is a plain `String`; the optional one is wrapped in
         // `Option`. Normalize whitespace so the token spacing doesn't matter.
         let normalized: String = struct_src.split_whitespace().collect();
@@ -1124,6 +1484,46 @@ paths:
             diag.warnings[0].contains("deepObject/object"),
             "{:?}",
             diag.warnings
+        );
+    }
+
+    #[test]
+    fn binary_response_resolves_to_byte_vec_with_bytes_encoding() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /files/{id}:
+    get:
+      operationId: downloadFile
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: ok
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+"#,
+        );
+        assert_eq!(ops.len(), 1);
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        let resp = &ops[0].responses[0];
+        assert_eq!(resp.headers.len(), 1);
+        assert!(resp.rust_type.is_some());
+        assert!(matches!(resp.encoding, Some(BodyEncoding::Bytes { .. })));
+        let enum_src = generate_response_enum(&ops[0], &test_binary_types()).to_string();
+        assert!(
+            enum_src.contains("DownloadFileStatus200"),
+            "headers should produce a payload struct: {enum_src}"
+        );
+        assert!(
+            enum_src.contains("TestResponseBody"),
+            "binary response body should use configured stream type: {enum_src}"
         );
     }
 

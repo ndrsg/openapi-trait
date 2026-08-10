@@ -2,7 +2,9 @@ use heck::{ToPascalCase, ToSnakeCase};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use openapi_trait_shared::codegen::operations::{OperationInfo, ParamInfo, ResponseStatus};
+use openapi_trait_shared::codegen::operations::{
+    BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo, ResponseHeaderInfo, ResponseStatus,
+};
 use openapi_trait_shared::codegen::security::{
     auth_enum_ident, resolve_alternatives, ApiKeyIn, SchemeInfo, SchemeKind,
 };
@@ -174,12 +176,31 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
             ResponseStatus::Code(n) => {
                 let variant_ident = format_ident!("Status{}", n);
                 let status_ident = status_code_ident(*n);
-                if r.rust_type.is_some() {
-                    quote! {
-                        Self::#variant_ident(body) => (
-                            ::axum::http::StatusCode::#status_ident,
-                            ::axum::Json(body),
-                        ).into_response(),
+                if !r.headers.is_empty() {
+                    generate_payload_into_response_arm(op, r, *n, &variant_ident, &status_ident)
+                } else if let Some(rust_type) = &r.rust_type {
+                    let _ = rust_type;
+                    match r.encoding.as_ref() {
+                        Some(BodyEncoding::Bytes { content_type }) => {
+                            let ct = content_type.as_str();
+                            quote! {
+                                Self::#variant_ident(body) => {
+                                    (
+                                        ::axum::http::StatusCode::#status_ident,
+                                        [(::axum::http::header::CONTENT_TYPE, #ct)],
+                                        body,
+                                    ).into_response()
+                                },
+                            }
+                        }
+                        _ => {
+                            quote! {
+                                Self::#variant_ident(body) => (
+                                    ::axum::http::StatusCode::#status_ident,
+                                    ::axum::Json(body),
+                                ).into_response(),
+                            }
+                        }
                     }
                 } else {
                     quote! {
@@ -207,6 +228,93 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                 use ::axum::response::IntoResponse as _;
                 match self {
                     #(#arms)*
+                }
+            }
+        }
+    }
+}
+
+/// Generate a match arm for a response variant that carries a headers payload struct.
+fn generate_payload_into_response_arm(
+    _op: &OperationInfo,
+    r: &openapi_trait_shared::codegen::operations::ResponseInfo,
+    _status: u16,
+    variant_ident: &syn::Ident,
+    status_ident: &syn::Ident,
+) -> TokenStream {
+    let body_response = match (&r.rust_type, &r.encoding) {
+        (Some(_), Some(BodyEncoding::Bytes { content_type })) => {
+            let ct = content_type.as_str();
+            quote! {
+                let mut response = (
+                    ::axum::http::StatusCode::#status_ident,
+                    [(::axum::http::header::CONTENT_TYPE, #ct)],
+                    payload.body,
+                )
+                    .into_response();
+            }
+        }
+        (Some(_), _) => {
+            quote! {
+                let mut response = (
+                    ::axum::http::StatusCode::#status_ident,
+                    ::axum::Json(payload.body),
+                )
+                    .into_response();
+            }
+        }
+        (None, _) => {
+            quote! {
+                let mut response = ::axum::http::StatusCode::#status_ident.into_response();
+            }
+        }
+    };
+
+    let header_inserts: Vec<TokenStream> = r
+        .headers
+        .iter()
+        .map(generate_response_header_insert)
+        .collect();
+
+    quote! {
+        Self::#variant_ident(payload) => {
+            #body_response
+            let __headers = response.headers_mut();
+            #(#header_inserts)*
+            response
+        },
+    }
+}
+
+/// Emit code that inserts one declared response header from a payload field.
+fn generate_response_header_insert(header: &ResponseHeaderInfo) -> TokenStream {
+    let field_ident = &header.field_ident;
+    let header_name = &header.name;
+
+    let wire_expr = match header.value_kind {
+        HeaderValueKind::String => quote! { ::std::borrow::ToOwned::to_owned(__v) },
+        HeaderValueKind::Integer => quote! { __v.to_string() },
+        HeaderValueKind::DateTime => quote! { __v.to_rfc3339() },
+    };
+
+    if header.required {
+        quote! {
+            if let ::core::result::Result::Ok(__hv) =
+                ::axum::http::HeaderValue::from_str({
+                    let __v = &payload.#field_ident;
+                    #wire_expr
+                }.as_str())
+            {
+                __headers.insert(#header_name, __hv);
+            }
+        }
+    } else {
+        quote! {
+            if let ::core::option::Option::Some(__v) = &payload.#field_ident {
+                if let ::core::result::Result::Ok(__hv) =
+                    ::axum::http::HeaderValue::from_str(#wire_expr.as_str())
+                {
+                    __headers.insert(#header_name, __hv);
                 }
             }
         }
@@ -671,16 +779,29 @@ fn build_body_extractor(op: &OperationInfo) -> (Option<TokenStream>, Option<Toke
         || (None, None),
         |body| {
             let ty = &body.rust_type;
-            let extractor = quote! {
-                ::axum::extract::Json(body):
-                    ::axum::extract::Json<#ty>
-            };
-            let field_init = if body.required {
-                quote! { body, }
-            } else {
-                quote! { body: ::core::option::Option::Some(body), }
-            };
-            (Some(extractor), Some(field_init))
+            match &body.encoding {
+                BodyEncoding::Bytes { .. } => {
+                    let extractor = quote! { body: ::axum::body::Body };
+                    let field_init = if body.required {
+                        quote! { body, }
+                    } else {
+                        quote! { body: ::core::option::Option::Some(body), }
+                    };
+                    (Some(extractor), Some(field_init))
+                }
+                BodyEncoding::Json => {
+                    let extractor = quote! {
+                        ::axum::extract::Json(body):
+                            ::axum::extract::Json<#ty>
+                    };
+                    let field_init = if body.required {
+                        quote! { body, }
+                    } else {
+                        quote! { body: ::core::option::Option::Some(body), }
+                    };
+                    (Some(extractor), Some(field_init))
+                }
+            }
         },
     )
 }

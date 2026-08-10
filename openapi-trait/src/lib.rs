@@ -273,3 +273,48 @@ pub use uuid;
 /// generated structs and enums.
 #[cfg(feature = "validation")]
 pub use serde_valid;
+
+/// Streaming byte chunks from a binary HTTP response body.
+///
+/// Returned by the generated reqwest client for binary media types instead of
+/// buffering the full payload in a [`Vec<u8>`].
+#[cfg(feature = "reqwest-client")]
+pub struct ByteStream {
+    /// Underlying reqwest byte stream.
+    inner: std::pin::Pin<
+        Box<dyn futures_core::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send>,
+    >,
+}
+
+#[cfg(feature = "reqwest-client")]
+impl ByteStream {
+    /// Wrap a reqwest response body as a byte stream.
+    #[must_use]
+    pub fn from_reqwest(response: reqwest::Response) -> Self {
+        Self {
+            inner: Box::pin(response.bytes_stream()),
+        }
+    }
+}
+
+#[cfg(feature = "reqwest-client")]
+impl futures_core::Stream for ByteStream {
+    type Item = Result<bytes::Bytes, reqwest::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+#[cfg(feature = "reqwest-client")]
+impl std::fmt::Debug for ByteStream {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("ByteStream").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "reqwest-client")]
+pub use bytes;

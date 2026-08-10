@@ -233,7 +233,10 @@ as a struct field.
 | Query parameters (including string enums) | ✅ |
 | Header parameters | ✅ |
 | Request bodies (JSON) | ✅ |
+| Request bodies (binary) | ✅ — streamed `axum::body::Body` (server) / `reqwest::Body` (client) |
 | Response enums per operation | ✅ |
+| Response headers | ✅ — `Content-Disposition`, `ETag`, `Cache-Control`, …; payload struct when headers are declared |
+| Binary file downloads | ✅ — streamed `axum::body::Body` (server) / [`ByteStream`](openapi-trait/src/lib.rs) (client) |
 | `oneOf` | ✅ — tagged enum when a `discriminator` is present, otherwise `#[serde(untagged)]` |
 | `allOf` | ✅ — merged struct (`$ref` branches via `#[serde(flatten)]`, inline objects inlined) |
 | `anyOf` | ✅ — `#[serde(untagged)]` enum |
