@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [0.0.9](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-axum-v0.0.8...openapi-trait-axum-v0.0.9) - 2026-08-12
+
+### Added
+
+- body streaming for binary types
+
 ## [0.0.8](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-axum-v0.0.7...openapi-trait-axum-v0.0.8) - 2026-07-02
 
 ### Added
