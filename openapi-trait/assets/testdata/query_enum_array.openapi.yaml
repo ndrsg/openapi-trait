@@ -1,0 +1,33 @@
+# Regression fixture for KNOWN_ISSUES.md D2 (parameters): the inline enum
+# items of an array query parameter get a generated enum instead of `String`.
+openapi: 3.0.3
+info:
+  title: Query enum array
+  version: "1.0"
+paths:
+  /colors:
+    get:
+      operationId: filterColors
+      parameters:
+        - name: color
+          in: query
+          required: true
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: string, enum: [red, dark-green] }
+        - name: shade
+          in: query
+          required: false
+          schema:
+            type: array
+            items: { type: string, enum: [light, dark] }
+      responses:
+        '200':
+          description: the wire values, as parsed by the server
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }

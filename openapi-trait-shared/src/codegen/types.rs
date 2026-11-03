@@ -28,14 +28,26 @@ pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> Toke
 /// wire, so `nullable` must not change their type.
 #[must_use]
 pub fn non_null_schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
+    non_null_schema_to_rust_type_ctx(ref_or, required, None, &mut CodegenCtx::default())
+}
+
+/// Like [`schema_to_rust_type_ctx`], but ignores `nullable: true` (see
+/// [`non_null_schema_to_rust_type`]).
+#[must_use]
+pub fn non_null_schema_to_rust_type_ctx(
+    ref_or: &ReferenceOr<Schema>,
+    required: bool,
+    parent_name: Option<&str>,
+    ctx: &mut CodegenCtx,
+) -> TokenStream {
     if let ReferenceOr::Item(schema) = ref_or {
         if schema.schema_data.nullable {
             let mut schema = schema.clone();
             schema.schema_data.nullable = false;
-            return schema_to_rust_type(&ReferenceOr::Item(schema), required);
+            return schema_to_rust_type_ctx(&ReferenceOr::Item(schema), required, parent_name, ctx);
         }
     }
-    schema_to_rust_type(ref_or, required)
+    schema_to_rust_type_ctx(ref_or, required, parent_name, ctx)
 }
 
 /// Context-aware variant of [`schema_to_rust_type`].

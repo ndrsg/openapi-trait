@@ -34,8 +34,9 @@ items:
     `{ParentStruct}{Property}`;
   - an inline request body schema becomes `{OperationId}Body`, and an
     inline response body schema becomes `{OperationId}Status{code}Body`;
-  - an inline query enum becomes `{OperationId}{Param}Query`, and an inline
-    path enum becomes `{OperationId}{Param}Path`.
+  - an inline query enum, or the inline enum items of an array query
+    parameter, becomes `{OperationId}{Param}Query`, and an inline path enum
+    becomes `{OperationId}{Param}Path`.
 
   If that name is already taken by a component schema, an operation type
   (`{OperationId}Request`, …) or another lifted type, a numeric suffix is

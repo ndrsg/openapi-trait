@@ -12,7 +12,8 @@ use super::idents;
 use super::schemas::doc_attr;
 use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
 use super::types::{
-    is_string_enum, non_null_schema_to_rust_type, schema_to_rust_type_ctx, string_enum_values,
+    is_string_enum, non_null_schema_to_rust_type, non_null_schema_to_rust_type_ctx,
+    schema_to_rust_type_ctx, string_enum_values,
 };
 
 /// All information about a single API operation needed by later codegen stages.
@@ -457,9 +458,14 @@ fn collect_params(
             (false, None, vec![])
         };
 
+        let array_item_type =
+            param_array_item_type(param, param_schema.as_ref(), operation_id, ctx);
+
         let rust_type = if is_enum {
             let ei = enum_ident.as_ref().unwrap();
             quote! { #ei }
+        } else if let Some(item) = &array_item_type {
+            quote! { ::std::vec::Vec<#item> }
         } else if let Some(schema) = &param_schema {
             let ref_or = ReferenceOr::Item(schema.clone());
             non_null_schema_to_rust_type(&ref_or, true)
@@ -467,7 +473,7 @@ fn collect_params(
             quote! { ::std::string::String }
         };
 
-        let query = query_serialization(param, param_schema.as_ref());
+        let query = query_serialization(param, array_item_type);
 
         // deepObject and object-valued query params are not yet serialized
         // per-spec; warn and fall back to default form serialization.
@@ -510,10 +516,46 @@ fn collect_params(
     Some((path_params, query_params, header_params))
 }
 
+/// The element type of an array parameter, or `None` when the schema isn't an
+/// array. An inline enum element of a query array gets its own type, named
+/// `{Op}{Param}Query` like a scalar query enum.
+fn param_array_item_type(
+    param: &Parameter,
+    param_schema: Option<&Schema>,
+    operation_id: &str,
+    ctx: &mut CodegenCtx,
+) -> Option<TokenStream> {
+    let Some(SchemaKind::Type(Type::Array(arr))) = param_schema.map(|s| &s.schema_kind) else {
+        return None;
+    };
+    let Some(items) = &arr.items else {
+        return Some(quote! { ::serde_json::Value });
+    };
+    let items = items.clone().unbox();
+    if !matches!(param, Parameter::Query { .. }) {
+        return Some(non_null_schema_to_rust_type(&items, true));
+    }
+    let name = format!(
+        "{}{}Query",
+        operation_id.to_pascal_case(),
+        param.parameter_data_ref().name.to_pascal_case()
+    );
+    Some(non_null_schema_to_rust_type_ctx(
+        &items,
+        true,
+        Some(&name),
+        ctx,
+    ))
+}
+
 /// Resolve a parameter's [`QuerySerialization`] from its `style`/`explode` and
-/// schema shape. Only `in: query` params carry a `style`; other locations get
-/// defaults (`form`, not exploded, not an array).
-fn query_serialization(param: &Parameter, param_schema: Option<&Schema>) -> QuerySerialization {
+/// its element type, which is `Some` for an array schema. Only `in: query`
+/// params carry a `style`; other locations get defaults (`form`, not
+/// exploded).
+fn query_serialization(
+    param: &Parameter,
+    array_item_type: Option<TokenStream>,
+) -> QuerySerialization {
     // Per the spec `explode` defaults to true for `form` and false otherwise.
     let (style, explode) = match param {
         Parameter::Query { style, .. } => {
@@ -532,23 +574,12 @@ fn query_serialization(param: &Parameter, param_schema: Option<&Schema>) -> Quer
         _ => (QueryStyleKind::Form, false),
     };
 
-    // Detect array schemas so array query params can be serialized per style and
-    // parsed element-by-element on the server.
-    let (is_array, array_item_type) = match param_schema.map(|s| &s.schema_kind) {
-        Some(SchemaKind::Type(Type::Array(arr))) => {
-            let item_ty = arr.items.as_ref().map_or_else(
-                || quote! { ::serde_json::Value },
-                |items| non_null_schema_to_rust_type(&items.clone().unbox(), true),
-            );
-            (true, Some(item_ty))
-        }
-        _ => (false, None),
-    };
-
+    // Array query params are serialized per style and parsed
+    // element-by-element on the server.
     QuerySerialization {
         style,
         explode,
-        is_array,
+        is_array: array_item_type.is_some(),
         array_item_type,
     }
 }
