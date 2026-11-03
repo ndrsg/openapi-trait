@@ -1,5 +1,6 @@
 //! Regression tests for `KNOWN_ISSUES.md` S2 (status codes outside the old
-//! hard-coded table were sent as 500).
+//! hard-coded table were sent as 500) and S3 (optional request bodies were
+//! required in practice).
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/status_and_body.openapi.yaml")]
@@ -24,6 +25,31 @@ impl sb::SbApi for Server {
             308 => sb::GetPartialResponse::Status308,
             _ => sb::GetPartialResponse::Status418,
         })
+    }
+
+    async fn opt_body(
+        &self,
+        req: sb::OptBodyRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sb::OptBodyResponse, Self::Error> {
+        Ok(sb::OptBodyResponse::Status200(format!("{:?}", req.body)))
+    }
+
+    async fn opt_bin_body(
+        &self,
+        req: sb::OptBinBodyRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sb::OptBinBodyResponse, Self::Error> {
+        let text = match req.body {
+            None => "none".to_owned(),
+            Some(body) => {
+                let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
+                format!("some:{}", String::from_utf8_lossy(&bytes))
+            }
+        };
+        Ok(sb::OptBinBodyResponse::Status200(text))
     }
 }
 
@@ -56,4 +82,61 @@ async fn declared_status_codes_are_sent_as_declared() {
             .unwrap();
         assert_eq!(resp.status().as_u16(), code);
     }
+}
+
+#[tokio::test]
+async fn optional_json_body_may_be_omitted() {
+    let base = spawn_server().await;
+
+    let resp = http().post(format!("{base}/opt")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(resp.text().await.unwrap(), r#""None""#);
+
+    let resp = http()
+        .post(format!("{base}/opt"))
+        .json(&5)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(resp.text().await.unwrap(), r#""Some(5)""#);
+}
+
+#[tokio::test]
+async fn optional_json_body_still_rejects_malformed_json() {
+    let base = spawn_server().await;
+    let resp = http()
+        .post(format!("{base}/opt"))
+        .header("content-type", "application/json")
+        .body("not json")
+        .send()
+        .await
+        .unwrap();
+    assert!(resp.status().is_client_error(), "{}", resp.status());
+}
+
+#[tokio::test]
+async fn optional_binary_body_may_be_omitted() {
+    let base = spawn_server().await;
+
+    let resp = http().post(format!("{base}/opt-bin")).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), r#""none""#);
+
+    let resp = http()
+        .post(format!("{base}/opt-bin"))
+        .header("content-type", "application/octet-stream")
+        .body("")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.text().await.unwrap(), r#""none""#);
+
+    let resp = http()
+        .post(format!("{base}/opt-bin"))
+        .header("content-type", "application/octet-stream")
+        .body("abc")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.text().await.unwrap(), r#""some:abc""#);
 }

@@ -779,21 +779,44 @@ fn build_body_extractor(op: &OperationInfo) -> (Option<TokenStream>, Option<Toke
                     let field_init = if body.required {
                         quote! { body, }
                     } else {
-                        quote! { body: ::core::option::Option::Some(body), }
+                        // An optional binary body counts as absent when it is
+                        // known to be empty or the client sends no `Content-Type`.
+                        quote! {
+                            body: {
+                                let __empty = ::axum::body::HttpBody::size_hint(&body)
+                                    .exact()
+                                    == ::core::option::Option::Some(0);
+                                let __untyped = !headers
+                                    .contains_key(::axum::http::header::CONTENT_TYPE);
+                                if __empty || __untyped {
+                                    ::core::option::Option::None
+                                } else {
+                                    ::core::option::Option::Some(body)
+                                }
+                            },
+                        }
                     };
                     (Some(extractor), Some(field_init))
                 }
                 BodyEncoding::Json => {
-                    let extractor = quote! {
-                        ::axum::extract::Json(body):
-                            ::axum::extract::Json<#ty>
-                    };
-                    let field_init = if body.required {
-                        quote! { body, }
+                    if body.required {
+                        let extractor = quote! {
+                            ::axum::extract::Json(body):
+                                ::axum::extract::Json<#ty>
+                        };
+                        (Some(extractor), Some(quote! { body, }))
                     } else {
-                        quote! { body: ::core::option::Option::Some(body), }
-                    };
-                    (Some(extractor), Some(field_init))
+                        // `Option<Json<T>>` (axum's `OptionalFromRequest`) yields
+                        // `None` when no JSON `Content-Type` is sent, and still
+                        // rejects a malformed JSON payload.
+                        let extractor = quote! {
+                            body: ::core::option::Option<::axum::extract::Json<#ty>>
+                        };
+                        let field_init = quote! {
+                            body: body.map(|::axum::extract::Json(__b)| __b),
+                        };
+                        (Some(extractor), Some(field_init))
+                    }
                 }
             }
         },
