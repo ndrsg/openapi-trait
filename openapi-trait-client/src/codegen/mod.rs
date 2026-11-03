@@ -8,6 +8,7 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use openapi_trait_shared::codegen::{
+    ctx::CodegenCtx,
     operations::{
         collect_operations, generate_operation_errors, generate_operation_types, BinaryBodyTypes,
     },
@@ -26,7 +27,8 @@ pub fn generate_client(
     include_reqwest: bool,
 ) -> TokenStream {
     let auth_schemes = collect_schemes(openapi);
-    let schema_types = generate_schemas(openapi);
+    let mut ctx = CodegenCtx::new(openapi);
+    let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes);
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);

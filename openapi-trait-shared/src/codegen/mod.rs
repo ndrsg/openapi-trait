@@ -1,4 +1,5 @@
 pub mod compositions;
+pub mod ctx;
 pub mod idents;
 pub mod operations;
 pub mod schemas;
@@ -16,7 +17,7 @@ use schemas::generate_schemas;
 /// Generate schema structs and enums only (framework-agnostic).
 #[must_use]
 pub fn generate_models(_mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
-    let schemas = generate_schemas(openapi);
+    let schemas = generate_schemas(openapi, &mut ctx::CodegenCtx::new(openapi));
     quote! {
         use super::*;
         #schemas
