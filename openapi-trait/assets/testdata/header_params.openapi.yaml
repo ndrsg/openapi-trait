@@ -1,0 +1,38 @@
+# Regression fixture for KNOWN_ISSUES.md D3: header parameters get the Rust
+# type of their schema instead of always `String`.
+openapi: 3.0.3
+info:
+  title: Header params
+  version: "1.0"
+paths:
+  /echo:
+    get:
+      operationId: echoHeaders
+      parameters:
+        - { name: X-Limit, in: header, required: true, schema: { type: integer, format: int32 } }
+        - { name: X-Verbose, in: header, schema: { type: boolean } }
+        - name: X-Mode
+          in: header
+          required: true
+          schema: { type: string, enum: [fast, slow-mo] }
+        - { name: X-Since, in: header, schema: { type: string, format: date-time } }
+        - { name: X-Request-Id, in: header, schema: { type: string, format: uuid } }
+        - { name: X-Note, in: header, schema: { type: string } }
+        - name: X-Ids
+          in: header
+          schema:
+            type: array
+            items: { type: integer, format: int64 }
+        - name: X-Tags
+          in: header
+          schema:
+            type: array
+            items: { type: string }
+      responses:
+        '200':
+          description: the parsed header values, rendered by the server
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }

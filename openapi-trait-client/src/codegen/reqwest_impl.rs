@@ -783,17 +783,17 @@ fn generate_header_builder(op: &OperationInfo) -> TokenStream {
         .map(|param| {
             let field_ident = &param.field_ident;
             let header_name = &param.name;
+            let value = header_wire_value(param, &quote! { value });
 
             if param.required {
-                // Required headers are non-optional `String`s on the request
-                // struct, so they can be set unconditionally.
                 quote! {
-                    request = request.header(#header_name, #field_ident);
+                    let value = #field_ident;
+                    request = request.header(#header_name, #value);
                 }
             } else {
                 quote! {
                     if let ::core::option::Option::Some(value) = #field_ident {
-                        request = request.header(#header_name, value);
+                        request = request.header(#header_name, #value);
                     }
                 }
             }
@@ -801,6 +801,25 @@ fn generate_header_builder(op: &OperationInfo) -> TokenStream {
         .collect();
 
     quote! { #(#header_updates)* }
+}
+
+/// The wire string for a header param bound to `value`. A plain `String` is
+/// sent as is; other values are rendered like query values (`query_value`),
+/// and an array joins its items with `,` (`style: simple`).
+fn header_wire_value(param: &ParamInfo, value: &TokenStream) -> TokenStream {
+    if param.query.is_array {
+        quote! {
+            #value
+                .iter()
+                .map(query_value)
+                .collect::<::std::vec::Vec<_>>()
+                .join(",")
+        }
+    } else if param.is_plain_string() {
+        quote! { #value }
+    } else {
+        quote! { query_value(&#value) }
+    }
 }
 
 /// Generate the reqwest request body population code for an operation.

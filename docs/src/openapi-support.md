@@ -27,7 +27,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 |---|---|
 | Path parameters, including enums | ✅ |
 | Query parameters, including enums and array `style`/`explode` | ✅ |
-| Header parameters | ✅ |
+| Header parameters, including enums | ✅ typed like query parameters; arrays use `style: simple` (`a,b,c`). The server returns 400 for a value that doesn't parse |
 | JSON request bodies | ✅ an optional body (`required: false`) is `None` when no JSON `Content-Type` is sent |
 | JSON media types (`application/*+json`, `charset` parameters) | ✅ typed like `application/json`; the declared media type is sent as the `Content-Type` |
 | Other request body media types (`text/plain`, forms, multipart) | not supported: the body is skipped with a warning |
