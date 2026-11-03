@@ -359,7 +359,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let alts = resolve_alternatives(&op.auth, schemes);
     let auth_query_keys = collect_auth_query_keys(op, schemes);
 
-    let (path_extractor, path_fields) = build_path_extractor(&op.path_params);
+    let (path_extractor, path_fields) = build_path_extractor(&op.path, &op.path_params);
     let (query_extractor, query_stmts, query_fields) = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
@@ -556,10 +556,20 @@ fn extract_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
 }
 
 /// Returns (extractor param token, vec of `field_name: var` init tokens).
-fn build_path_extractor(params: &[ParamInfo]) -> (Option<TokenStream>, Vec<TokenStream>) {
+///
+/// axum fills a tuple `Path<(A, B)>` positionally in *URL template order*, so
+/// the params are sorted by where their `{name}` placeholder appears in `path`
+/// rather than by their declaration order in the spec.
+fn build_path_extractor(
+    path: &str,
+    params: &[ParamInfo],
+) -> (Option<TokenStream>, Vec<TokenStream>) {
     if params.is_empty() {
         return (None, vec![]);
     }
+
+    let mut params: Vec<&ParamInfo> = params.iter().collect();
+    params.sort_by_key(|p| path.find(&format!("{{{}}}", p.name)).unwrap_or(usize::MAX));
 
     let types: Vec<TokenStream> = params.iter().map(|p| p.rust_type.clone()).collect();
     let var_idents: Vec<proc_macro2::Ident> = params
