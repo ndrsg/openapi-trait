@@ -1,4 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md S2 (uncommon status codes).
+# Regression fixture for KNOWN_ISSUES.md S2 (uncommon status codes) and S3
+# (optional request bodies).
 openapi: 3.0.1
 info:
   title: status and body
@@ -16,3 +17,25 @@ paths:
             application/json: { schema: { type: string } }
         '308': { description: permanent redirect }
         '418': { description: teapot }
+  /opt:
+    post:
+      operationId: optBody
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: integer } } }
+      responses:
+        '200':
+          description: echo
+          content:
+            application/json: { schema: { type: string } }
+  /opt-bin:
+    post:
+      operationId: optBinBody
+      requestBody:
+        required: false
+        content: { application/octet-stream: { schema: { type: string, format: binary } } }
+      responses:
+        '200':
+          description: echo
+          content:
+            application/json: { schema: { type: string } }
