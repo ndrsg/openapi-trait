@@ -27,3 +27,6 @@ but they never stop the build.
 - **Files are named after the module.** Two `mod petstore {}` blocks writing to
   the same directory overwrite each other. Give each build its own directory to
   keep both.
+- **To navigate the code in your IDE**, use
+  [`source_file`](go-to-definition.md) instead. It writes the code that is
+  actually compiled, so go-to-definition opens it.

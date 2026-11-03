@@ -98,6 +98,10 @@ Runnable versions of both examples are in
   buffered.
 - **Validation (opt-in).** Schema constraints become
   [`serde_valid`](https://docs.rs/serde_valid) rules.
+- **Go-to-definition.** Add `source_file`
+  (`#[openapi_trait::axum("openapi/pets.yaml", source_file)]`) and F12 in your
+  IDE opens the generated code. It is written to a self-gitignored
+  `.openapi-trait/` folder ([details](https://ndrsg.github.io/openapi-trait/go-to-definition.html)).
 - **Debug dump.** Set `OPENAPI_TRAIT_DEBUG=1` to write the generated code to
   disk.
 

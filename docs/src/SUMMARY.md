@@ -14,5 +14,6 @@
 
 - [Generated code](generated-code.md)
 - [OpenAPI support](openapi-support.md)
+- [Go-to-definition in your IDE](go-to-definition.md)
 - [Debugging generated code](debugging.md)
 - [Crates and features](crates.md)

@@ -48,6 +48,9 @@ Put the attribute on an empty module:
 - **YAML and JSON** specs are both accepted.
 - **Every operation needs an `operationId`.** It becomes the method name
   (`getPet` → `get_pet`).
+- **Want F12 to open the generated code?** Add `source_file`:
+  `#[openapi_trait::axum("pets.openapi.yaml", source_file)]`. See
+  [Go-to-definition in your IDE](go-to-definition.md).
 
 ## Names come from the module
 

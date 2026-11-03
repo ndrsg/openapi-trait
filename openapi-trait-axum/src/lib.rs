@@ -8,10 +8,11 @@
 /// Code-generation modules for the axum backend.
 mod codegen;
 
+use openapi_trait_shared::args::MacroArgs;
+use openapi_trait_shared::source_file::{module_contents, wrap_module};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::quote;
-use syn::{parse_macro_input, ItemMod, LitStr};
+use syn::{parse_macro_input, ItemMod};
 
 /// Generates typed Rust code from an `OpenAPI` specification file.
 ///
@@ -41,6 +42,28 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 /// First positional argument: path to the `OpenAPI` YAML or JSON file,
 /// relative to the crate root (`CARGO_MANIFEST_DIR`).
 ///
+/// Optional: `source_file` or `source_file = "dir"`. See
+/// [Go-to-definition](#go-to-definition).
+///
+/// # Go-to-definition
+///
+/// Add `source_file` to make IDE go-to-definition open the generated code
+/// instead of this attribute:
+///
+/// ```text
+/// #[openapi_trait::axum("openapi/pets.yaml", source_file)]
+/// #[openapi_trait::axum("openapi/pets.yaml", source_file = "some/dir")]
+/// ```
+///
+/// The macro writes the prettyprinted module body to
+/// `<module>.axum.<hash>.rs` and `include!`s it. With a bare `source_file`, the
+/// file goes into `.openapi-trait/` in the crate root, which gets a
+/// `.gitignore` containing `*`. With `source_file = "dir"`, it goes into `dir`
+/// (relative to `CARGO_MANIFEST_DIR`), which you should gitignore yourself.
+/// The file is rewritten only when its content changes. rust-analyzer may need
+/// a server restart after the file is first created. If writing fails, the
+/// macro warns on stderr and falls back to inline code.
+///
 /// # Debugging
 ///
 /// Set the `OPENAPI_TRAIT_DEBUG` environment variable to dump a prettyprinted
@@ -59,12 +82,13 @@ use syn::{parse_macro_input, ItemMod, LitStr};
 /// - An operation is missing an `operationId`.
 #[proc_macro_attribute]
 pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let path_lit = parse_macro_input!(attr as LitStr);
-    run_macro(&path_lit, item)
+    let args = parse_macro_input!(attr as MacroArgs);
+    run_macro(&args, item)
 }
 
 /// Run the core macro logic with the resolved spec path literal.
-fn run_macro(path_lit: &LitStr, item: TokenStream) -> TokenStream {
+fn run_macro(args: &MacroArgs, item: TokenStream) -> TokenStream {
+    let path_lit = &args.spec;
     let module = parse_macro_input!(item as ItemMod);
     let mod_ident = &module.ident;
     let mod_vis = &module.vis;
@@ -103,23 +127,14 @@ fn run_macro(path_lit: &LitStr, item: TokenStream) -> TokenStream {
 
     let body = codegen::generate_axum(mod_ident, &openapi);
 
-    let expanded = quote! {
-        // Re-compile when the spec file changes.
-        const _: &str = ::core::include_str!(#spec_path_str);
-
-        #[allow(
-            missing_docs,
-            missing_debug_implementations,
-            dead_code,
-            unused_imports,
-            clippy::all,
-            clippy::nursery,
-            clippy::pedantic,
-        )]
-        #mod_vis mod #mod_ident {
-            #body
-        }
-    };
+    let contents = module_contents(
+        args.source_file.as_ref(),
+        "axum",
+        mod_ident,
+        &path_lit.value(),
+        &body,
+    );
+    let expanded = wrap_module(mod_vis, mod_ident, &spec_path_str, &contents);
 
     openapi_trait_shared::debug::write_debug_output(mod_ident, &expanded);
 

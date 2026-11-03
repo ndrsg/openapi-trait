@@ -29,4 +29,5 @@ items:
   - an inline query enum becomes `{OperationId}{Param}Query`.
 
 The best way to see what a spec produces is to
-[dump the generated code](debugging.md).
+[dump the generated code](debugging.md), or to add
+[`source_file`](go-to-definition.md) and jump into the code from your IDE.

@@ -10,10 +10,11 @@ mod codegen;
 /// Derive expansion helpers for `ReqwestClient`.
 mod reqwest_derive;
 
+use openapi_trait_shared::args::MacroArgs;
+use openapi_trait_shared::source_file::{module_contents, wrap_module};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::quote;
-use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
+use syn::{parse_macro_input, DeriveInput, ItemMod};
 
 /// Generates transport-agnostic Rust client traits from an `OpenAPI` specification file.
 ///
@@ -35,6 +36,25 @@ use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
 /// The generated trait name is derived from the annotated module name, so
 /// `mod petstore {}` produces `petstore::PetstoreClient`.
 ///
+/// # Go-to-definition
+///
+/// Add `source_file` to make IDE go-to-definition open the generated code
+/// instead of this attribute:
+///
+/// ```text
+/// #[openapi_trait::client("openapi/pets.yaml", source_file)]
+/// #[openapi_trait::client("openapi/pets.yaml", source_file = "some/dir")]
+/// ```
+///
+/// The macro writes the prettyprinted module body to
+/// `<module>.client.<hash>.rs` and `include!`s it. With a bare `source_file`, the
+/// file goes into `.openapi-trait/` in the crate root, which gets a
+/// `.gitignore` containing `*`. With `source_file = "dir"`, it goes into `dir`
+/// (relative to `CARGO_MANIFEST_DIR`), which you should gitignore yourself.
+/// The file is rewritten only when its content changes. rust-analyzer may need
+/// a server restart after the file is first created. If writing fails, the
+/// macro warns on stderr and falls back to inline code.
+///
 /// # Debugging
 ///
 /// Set the `OPENAPI_TRAIT_DEBUG` environment variable to dump a prettyprinted
@@ -45,8 +65,8 @@ use syn::{parse_macro_input, DeriveInput, ItemMod, LitStr};
 /// stderr during the build.
 #[proc_macro_attribute]
 pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let path_lit = parse_macro_input!(attr as LitStr);
-    run_macro(&path_lit, item, cfg!(feature = "reqwest-client"))
+    let args = parse_macro_input!(attr as MacroArgs);
+    run_macro(&args, item, cfg!(feature = "reqwest-client"))
 }
 
 /// Derive the reqwest client carrier trait for a user-owned struct.
@@ -65,7 +85,8 @@ pub fn derive_reqwest_client(item: TokenStream) -> TokenStream {
 }
 
 /// Expand `#[openapi_trait("...")]` into a generated client module.
-fn run_macro(path_lit: &LitStr, item: TokenStream, include_reqwest: bool) -> TokenStream {
+fn run_macro(args: &MacroArgs, item: TokenStream, include_reqwest: bool) -> TokenStream {
+    let path_lit = &args.spec;
     let module = parse_macro_input!(item as ItemMod);
     let mod_ident = &module.ident;
     let mod_vis = &module.vis;
@@ -104,22 +125,14 @@ fn run_macro(path_lit: &LitStr, item: TokenStream, include_reqwest: bool) -> Tok
 
     let body = codegen::generate_client(mod_ident, &openapi, include_reqwest);
 
-    let expanded = quote! {
-        const _: &str = ::core::include_str!(#spec_path_str);
-
-        #[allow(
-            missing_docs,
-            missing_debug_implementations,
-            dead_code,
-            unused_imports,
-            clippy::all,
-            clippy::nursery,
-            clippy::pedantic,
-        )]
-        #mod_vis mod #mod_ident {
-            #body
-        }
-    };
+    let contents = module_contents(
+        args.source_file.as_ref(),
+        "client",
+        mod_ident,
+        &path_lit.value(),
+        &body,
+    );
+    let expanded = wrap_module(mod_vis, mod_ident, &spec_path_str, &contents);
 
     openapi_trait_shared::debug::write_debug_output(mod_ident, &expanded);
 
