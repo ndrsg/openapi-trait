@@ -21,6 +21,7 @@ use openapiv3::{Discriminator, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
+use super::ctx::CodegenCtx;
 use super::schemas::{doc_attr, model_derives, object_field_tokens};
 use super::types::{ref_to_ident, schema_to_rust_type_ctx};
 
@@ -34,17 +35,9 @@ pub fn generate_one_of(
     variants: &[ReferenceOr<Schema>],
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
-    inline_types: &mut Vec<TokenStream>,
-    models: &std::collections::BTreeSet<String>,
+    ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    generate_enum(
-        name,
-        variants,
-        discriminator,
-        description,
-        inline_types,
-        models,
-    )
+    generate_enum(name, variants, discriminator, description, ctx)
 }
 
 /// Generate a Rust enum type for an `anyOf` composition.
@@ -57,10 +50,9 @@ pub fn generate_any_of(
     name: &str,
     variants: &[ReferenceOr<Schema>],
     description: Option<&String>,
-    inline_types: &mut Vec<TokenStream>,
-    models: &std::collections::BTreeSet<String>,
+    ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    generate_enum(name, variants, None, description, inline_types, models)
+    generate_enum(name, variants, None, description, ctx)
 }
 
 /// Generate a Rust struct type for an `allOf` composition.
@@ -74,8 +66,7 @@ pub fn generate_all_of(
     name: &str,
     variants: &[ReferenceOr<Schema>],
     description: Option<&String>,
-    inline_types: &mut Vec<TokenStream>,
-    models: &std::collections::BTreeSet<String>,
+    ctx: &mut CodegenCtx,
 ) -> TokenStream {
     let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&description.cloned());
@@ -103,8 +94,7 @@ pub fn generate_all_of(
                             &prop_ref.clone().unbox(),
                             is_required,
                             name,
-                            inline_types,
-                            models,
+                            ctx,
                         ));
                     }
                 } else {
@@ -117,8 +107,7 @@ pub fn generate_all_of(
                         &ReferenceOr::Item(schema.clone()),
                         true,
                         Some(&parent),
-                        inline_types,
-                        models,
+                        ctx,
                     );
                     fields.push(quote! {
                         #[serde(flatten)]
@@ -145,8 +134,7 @@ fn generate_enum(
     variants: &[ReferenceOr<Schema>],
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
-    inline_types: &mut Vec<TokenStream>,
-    models: &std::collections::BTreeSet<String>,
+    ctx: &mut CodegenCtx,
 ) -> TokenStream {
     let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&description.cloned());
@@ -162,9 +150,7 @@ fn generate_enum(
     let variant_tokens: Vec<TokenStream> = variants
         .iter()
         .enumerate()
-        .map(|(idx, branch)| {
-            build_enum_variant(name, idx, branch, discriminator, inline_types, models)
-        })
+        .map(|(idx, branch)| build_enum_variant(name, idx, branch, discriminator, ctx))
         .collect();
 
     let derives = model_derives();
@@ -184,8 +170,7 @@ fn build_enum_variant(
     idx: usize,
     branch: &ReferenceOr<Schema>,
     discriminator: Option<&Discriminator>,
-    inline_types: &mut Vec<TokenStream>,
-    models: &std::collections::BTreeSet<String>,
+    ctx: &mut CodegenCtx,
 ) -> TokenStream {
     match branch {
         ReferenceOr::Reference { reference } => {
@@ -210,8 +195,7 @@ fn build_enum_variant(
                 &ReferenceOr::Item(schema.clone()),
                 true,
                 Some(&parent_for_synth),
-                inline_types,
-                models,
+                ctx,
             );
             quote! {
                 #variant_ident(#ty)

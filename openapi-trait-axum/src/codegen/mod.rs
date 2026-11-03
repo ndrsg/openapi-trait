@@ -9,6 +9,7 @@ use quote::quote;
 
 use api_trait::generate_trait;
 use openapi_trait_shared::codegen::{
+    ctx::CodegenCtx,
     operations::{
         collect_operations, generate_operation_errors, generate_operation_types, BinaryBodyTypes,
     },
@@ -22,7 +23,8 @@ use router::generate_router;
 /// Generate schemas + operation types + trait + axum router.
 pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
     let auth_schemes = collect_schemes(openapi);
-    let schema_types = generate_schemas(openapi);
+    let mut ctx = CodegenCtx::new(openapi);
+    let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes);
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
