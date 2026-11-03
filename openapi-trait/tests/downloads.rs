@@ -79,7 +79,9 @@ impl downloads_server::DownloadsServerApi<AppState> for MockDownloads {
             .await
             .expect("upload destination writable");
         Ok(downloads_server::UploadFileResponse::Status201(
-            serde_json::json!({ "id": format!("uploaded-{nbytes}") }),
+            downloads_server::UploadFileStatus201Body {
+                id: format!("uploaded-{nbytes}"),
+            },
         ))
     }
 }
@@ -239,7 +241,7 @@ mod client_tests {
             .await
             .unwrap();
 
-        assert_eq!(resp["id"], "uploaded-16");
+        assert_eq!(resp.id, "uploaded-16");
         assert_eq!(
             tokio::fs::read(&upload_dest).await.unwrap(),
             b"raw-upload-bytes"

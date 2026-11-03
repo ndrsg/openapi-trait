@@ -32,6 +32,8 @@ items:
   appear:
   - a nested object or composition in a property becomes
     `{ParentStruct}{Property}`;
+  - an inline request body schema becomes `{OperationId}Body`, and an
+    inline response body schema becomes `{OperationId}Status{code}Body`;
   - an inline query enum becomes `{OperationId}{Param}Query`, and an inline
     path enum becomes `{OperationId}{Param}Path`.
 

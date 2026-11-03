@@ -12,7 +12,7 @@ use super::idents;
 use super::schemas::doc_attr;
 use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
 use super::types::{
-    is_string_enum, non_null_schema_to_rust_type, schema_to_rust_type, string_enum_values,
+    is_string_enum, non_null_schema_to_rust_type, schema_to_rust_type_ctx, string_enum_values,
 };
 
 /// All information about a single API operation needed by later codegen stages.
@@ -373,9 +373,9 @@ fn build_operation_info(
     let body = operation
         .request_body
         .as_ref()
-        .and_then(|rb| build_body_info(rb, openapi, &operation_id, diag));
+        .and_then(|rb| build_body_info(rb, openapi, &operation_id, ctx, diag));
 
-    let responses = build_responses(&operation.responses, openapi, &operation_id, diag);
+    let responses = build_responses(&operation.responses, openapi, &operation_id, ctx, diag);
     let auth = resolve_op_security(operation, openapi, schemes);
 
     Some(OperationInfo {
@@ -636,6 +636,7 @@ fn build_body_info(
     ref_or_rb: &ReferenceOr<RequestBody>,
     openapi: &OpenAPI,
     op_id: &str,
+    ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Option<BodyInfo> {
     let rb = match ref_or_rb {
@@ -651,7 +652,8 @@ fn build_body_info(
         }
     };
 
-    let Some(resolved) = media_type_to_rust(&rb.content, openapi) else {
+    let body_name = format!("{}Body", op_id.to_pascal_case());
+    let Some(resolved) = media_type_to_rust(&rb.content, &body_name, ctx) else {
         if !rb.content.is_empty() {
             let types: Vec<&str> = rb.content.keys().map(String::as_str).collect();
             diag.warn(format!(
@@ -724,10 +726,13 @@ fn is_json_media_type(content_type: &str) -> bool {
 /// Resolve the Rust type and wire encoding from a content map.
 ///
 /// JSON media types win over binary ones, and plain `application/json` wins
-/// over other JSON media types. Entries without a schema are skipped.
+/// over other JSON media types. Entries without a schema are skipped. An
+/// inline JSON schema that needs its own type (an object, enum or
+/// composition) is synthesized under `type_name` into `ctx`.
 fn media_type_to_rust(
     content: &indexmap::IndexMap<String, MediaType>,
-    _openapi: &OpenAPI,
+    type_name: &str,
+    ctx: &mut CodegenCtx,
 ) -> Option<MediaTypeResolved> {
     let with_schema = || {
         content
@@ -740,7 +745,7 @@ fn media_type_to_rust(
         .or_else(|| with_schema().find(|(ct, _)| is_json_media_type(ct)));
     if let Some((content_type, ref_or_schema)) = json {
         return Some(MediaTypeResolved {
-            rust_type: schema_to_rust_type(ref_or_schema, true),
+            rust_type: schema_to_rust_type_ctx(ref_or_schema, true, Some(type_name), ctx),
             encoding: BodyEncoding::Json {
                 content_type: content_type.clone(),
             },
@@ -760,12 +765,13 @@ fn media_type_to_rust(
 /// Resolve media type for a response, emitting a warning for unsupported types.
 fn response_media_type_to_rust(
     content: &indexmap::IndexMap<String, MediaType>,
-    openapi: &OpenAPI,
+    type_name: &str,
+    ctx: &mut CodegenCtx,
     op_id: &str,
     status_label: &str,
     diag: &mut Diagnostics,
 ) -> Option<MediaTypeResolved> {
-    media_type_to_rust(content, openapi).or_else(|| {
+    media_type_to_rust(content, type_name, ctx).or_else(|| {
         if !content.is_empty() {
             diag.warn(format!(
                 "operation `{op_id}`: response {status_label} has unsupported non-JSON/non-binary content types; body typing skipped"
@@ -880,6 +886,7 @@ fn build_responses(
     responses: &Responses,
     openapi: &OpenAPI,
     op_id: &str,
+    ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Vec<ResponseInfo> {
     let mut out = Vec::new();
@@ -899,21 +906,10 @@ fn build_responses(
             }
         };
 
-        let headers = build_response_headers(resp, op_id, openapi, diag);
-        let media = response_media_type_to_rust(
-            &resp.content,
-            openapi,
-            op_id,
-            &format!("status `{status_code}`"),
-            diag,
-        );
-        let (rust_type, encoding) =
-            media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
-
-        let status = match status_code {
+        let n = match status_code {
             // openapiv3 already rejects codes outside 100..=999 at parse time;
             // the guard keeps the invariant the server codegen relies on explicit.
-            StatusCode::Code(n) if (100..=999).contains(n) => ResponseStatus::Code(*n),
+            StatusCode::Code(n) if (100..=999).contains(n) => *n,
             StatusCode::Code(n) => {
                 diag.warn(format!(
                     "operation `{op_id}`: response status `{n}` is not a valid HTTP status code (must be 100..=999) and was skipped"
@@ -928,8 +924,20 @@ fn build_responses(
             }
         };
 
+        let headers = build_response_headers(resp, op_id, openapi, diag);
+        let media = response_media_type_to_rust(
+            &resp.content,
+            &format!("{}Status{n}Body", op_id.to_pascal_case()),
+            ctx,
+            op_id,
+            &format!("status `{n}`"),
+            diag,
+        );
+        let (rust_type, encoding) =
+            media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
+
         out.push(ResponseInfo {
-            status,
+            status: ResponseStatus::Code(n),
             description: resp.description.clone(),
             rust_type,
             encoding,

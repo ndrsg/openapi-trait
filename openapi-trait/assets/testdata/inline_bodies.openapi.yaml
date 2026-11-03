@@ -1,0 +1,73 @@
+# Regression fixture for KNOWN_ISSUES.md D2: inline request and response body
+# schemas get generated types instead of `serde_json::Value`.
+openapi: 3.0.1
+info:
+  title: inline_bodies
+  version: 0.0.1
+paths:
+  /things:
+    post:
+      operationId: createThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                size: { type: string, enum: [small, large] }
+      responses:
+        '201':
+          description: created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, name]
+                properties:
+                  id: { type: integer }
+                  name: { type: string }
+        '400':
+          description: rejected
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/Problem' }
+                  - { type: string }
+    get:
+      operationId: listThings
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: integer }
+  /status:
+    get:
+      operationId: getStatus
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { type: string, enum: [up, down] }
+components:
+  schemas:
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+    # Takes the name the `getStatus` 200 body would get.
+    GetStatusStatus200Body:
+      type: object
+      properties:
+        unrelated: { type: boolean }
