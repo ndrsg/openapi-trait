@@ -26,6 +26,8 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
     let mut ctx = CodegenCtx::new(openapi);
     let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes, &mut ctx);
+    // Types synthesized for inline request and response bodies.
+    let op_inline_types = ctx.take_inline_types();
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(
@@ -62,6 +64,7 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
         #schema_types
         #auth_types
         #(#op_auth_enums)*
+        #(#op_inline_types)*
         #op_types
         #api_trait
         #router
