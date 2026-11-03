@@ -1,5 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` S1 (path params bound in URL order)
-//! and C1 (string-enum path params get a generated type).
+//! Regression tests for `KNOWN_ISSUES.md` S1 (path params bound in URL order),
+//! C1 (string-enum path params get a generated type) and C2 (an operation-level
+//! param overrides a path-level one with the same name and location).
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/path_params.openapi.yaml")]
@@ -56,6 +57,16 @@ impl pp_server::PpServerApi for Server {
         };
         Ok(pp_server::GetThingResponse::Status200(kind.to_owned()))
     }
+
+    async fn get_dup(
+        &self,
+        req: pp_server::GetDupRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<pp_server::GetDupResponse, Self::Error> {
+        let id: i64 = req.id;
+        Ok(pp_server::GetDupResponse::Status200(id * 2))
+    }
 }
 
 async fn spawn_server() -> String {
@@ -106,6 +117,13 @@ fn enum_path_param_displays_its_wire_value() {
     assert_eq!(pp_server::GetThingKindPath::XY.to_string(), "x-y");
 }
 
+#[tokio::test]
+async fn operation_level_param_overrides_path_level_param() {
+    let base = spawn_server().await;
+    let (status, body) = get(format!("{base}/dup/21")).await;
+    assert_eq!((status, body.as_str()), (200, "42"));
+}
+
 #[cfg(feature = "reqwest-client")]
 mod client {
     use super::{pp_client, spawn_server};
@@ -150,5 +168,11 @@ mod client {
         assert!(
             matches!(resp, pp_client::GetSwappedResponse::Status200(ref s) if s == "a=AAA b=BBB")
         );
+
+        let resp = client
+            .get_dup(pp_client::GetDupRequest { id: 5 }, None)
+            .await
+            .unwrap();
+        assert!(matches!(resp, pp_client::GetDupResponse::Status200(10)));
     }
 }
