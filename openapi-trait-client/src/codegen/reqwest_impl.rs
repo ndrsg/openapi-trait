@@ -510,31 +510,56 @@ fn generate_response_match(
         })
         .collect();
 
-    let fallback = if op
+    let fallback = op
         .responses
         .iter()
-        .any(|response| matches!(response.status, ResponseStatus::Default))
-    {
-        quote! {
-            _ => {
-                let body = response.text().await.map_err(#error_name::Transport)?;
-                ::core::result::Result::Ok(#resp_ident::Default(body))
-            }
-        }
-    } else {
-        quote! {
-            _ => {
-                let body = response.text().await.map_err(#error_name::Transport)?;
-                ::core::result::Result::Err(#error_name::UnexpectedStatus {
-                    operation: #operation_name,
-                    status,
-                    body,
-                })
-            }
-        }
-    };
+        .find(|response| matches!(response.status, ResponseStatus::Default))
+        .map_or_else(
+            || {
+                quote! {
+                    _ => {
+                        let body = response.text().await.map_err(#error_name::Transport)?;
+                        ::core::result::Result::Err(#error_name::UnexpectedStatus {
+                            operation: #operation_name,
+                            status,
+                            body,
+                        })
+                    }
+                }
+            },
+            |default| generate_default_response_arm(op, default, error_name, resp_ident),
+        );
 
     (response_arms, fallback)
+}
+
+/// Generate the `_ =>` arm that decodes any undeclared status into the
+/// `Default { status, body, <headers> }` variant.
+fn generate_default_response_arm(
+    op: &OperationInfo,
+    default: &openapi_trait_shared::codegen::operations::ResponseInfo,
+    error_name: &proc_macro2::Ident,
+    resp_ident: &TokenStream,
+) -> TokenStream {
+    let header_reads = default
+        .headers
+        .iter()
+        .map(|h| generate_response_header_read(h, error_name, &op.operation_id));
+    let header_fields = default.headers.iter().map(|h| &h.field_ident);
+    let body_read = response_body_read(default, error_name);
+    let body_field = default.rust_type.as_ref().map(|_| quote! { body, });
+    quote! {
+        _ => {
+            // Headers must be read before the body consumes the response.
+            #(#header_reads)*
+            #body_read
+            ::core::result::Result::Ok(#resp_ident::Default {
+                status,
+                #body_field
+                #(#header_fields,)*
+            })
+        }
+    }
 }
 
 /// Generate a response match arm for a variant with a headers payload struct.
@@ -570,15 +595,7 @@ fn generate_payload_response_arm(
     };
 
     // Headers must be read before the body consumes the response.
-    let body_read = match (&response.rust_type, &response.encoding) {
-        (Some(_), Some(BodyEncoding::Bytes { .. })) => quote! {
-            let body = ::openapi_trait::ByteStream::from_reqwest(response);
-        },
-        (Some(_), _) => quote! {
-            let body = response.json().await.map_err(#error_name::Transport)?;
-        },
-        (None, _) => quote! {},
-    };
+    let body_read = response_body_read(response, error_name);
 
     quote! {
         #code => {
@@ -589,6 +606,23 @@ fn generate_payload_response_arm(
                 #(#header_fields)*
             }))
         }
+    }
+}
+
+/// Emit `let body = …;`, which consumes the response to read a body as the
+/// response's declared type. Empty when the response has no body.
+fn response_body_read(
+    response: &openapi_trait_shared::codegen::operations::ResponseInfo,
+    error_name: &proc_macro2::Ident,
+) -> TokenStream {
+    match (&response.rust_type, &response.encoding) {
+        (Some(_), Some(BodyEncoding::Bytes { .. })) => quote! {
+            let body = ::openapi_trait::ByteStream::from_reqwest(response);
+        },
+        (Some(_), _) => quote! {
+            let body = response.json().await.map_err(#error_name::Transport)?;
+        },
+        (None, _) => quote! {},
     }
 }
 

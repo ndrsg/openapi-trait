@@ -260,6 +260,10 @@ pub use chrono;
 pub use form_urlencoded;
 pub use uuid;
 
+/// Re-export of [`http`], for the `status` of a generated `Default` response
+/// variant. It's the same `StatusCode` as `axum::http::StatusCode` and
+/// `reqwest::StatusCode`.
+pub use http;
 /// Re-export of [`serde`], used by the generated types' `Serialize` and
 /// `Deserialize` derives (through `#[serde(crate = "::openapi_trait::serde")]`),
 /// so you don't need `serde` as a dependency.

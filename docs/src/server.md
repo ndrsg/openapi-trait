@@ -20,6 +20,21 @@ Each method receives one argument, the operation's `{operation}::Context`
 variant per declared status code (`Status200(Pet)`, `Status404`, …), and each
 variant implements `IntoResponse` with the matching status and body.
 
+A `default` response becomes a `Default` variant that carries its own status,
+so one response can describe every error. If `getPet` declared a `default`
+response with an `Error` schema as its body:
+
+```rust,ignore
+Ok(get_pet::Response::Default {
+    status: openapi_trait::http::StatusCode::UNPROCESSABLE_ENTITY,
+    body: pets::Error { code: 422, message: "bad id".into() },
+})
+```
+
+`openapi_trait::http::StatusCode` is the same type as
+`axum::http::StatusCode`. Response headers declared on `default` are fields of
+the variant, next to `body`.
+
 ## The handler's context
 
 `{operation}::Context` holds everything the router extracted for one request:

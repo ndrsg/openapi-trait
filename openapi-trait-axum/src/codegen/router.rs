@@ -187,7 +187,10 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                 let variant_ident = format_ident!("Status{}", n);
                 let status_code = status_code_expr(*n);
                 if !r.headers.is_empty() {
-                    generate_payload_into_response_arm(op, r, *n, &variant_ident, &status_code)
+                    let pattern = quote! { Self::#variant_ident(payload) };
+                    generate_payload_into_response_arm(r, &pattern, &status_code, |field| {
+                        quote! { payload.#field }
+                    })
                 } else if let Some(rust_type) = &r.rust_type {
                     let _ = rust_type;
                     match r.encoding.as_ref() {
@@ -224,12 +227,12 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                 }
             }
             ResponseStatus::Default => {
-                quote! {
-                    Self::Default(msg) => (
-                        ::axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                        msg,
-                    ).into_response(),
-                }
+                let body = r.rust_type.as_ref().map(|_| quote! { body, });
+                let headers = r.headers.iter().map(|h| &h.field_ident);
+                let pattern = quote! { Self::Default { status, #body #(#headers,)* } };
+                generate_payload_into_response_arm(r, &pattern, &quote! { status }, |field| {
+                    quote! { #field }
+                })
             }
         })
         .collect();
@@ -254,14 +257,18 @@ fn json_content_type_header(encoding: Option<&BodyEncoding>) -> Option<TokenStre
     Some(quote! { [(::axum::http::header::CONTENT_TYPE, #ct)], })
 }
 
-/// Generate a match arm for a response variant that carries a headers payload struct.
+/// Generate a match arm for a response variant whose body and headers are
+/// fields: a `Status{code}` payload struct, or the `Default` variant.
+///
+/// `pattern` binds the variant, and `field` turns a field ident (`body` or a
+/// header) into the expression that reads it.
 fn generate_payload_into_response_arm(
-    _op: &OperationInfo,
     r: &openapi_trait_shared::codegen::operations::ResponseInfo,
-    _status: u16,
-    variant_ident: &syn::Ident,
+    pattern: &TokenStream,
     status_code: &TokenStream,
+    field: impl Fn(&syn::Ident) -> TokenStream,
 ) -> TokenStream {
+    let body = field(&format_ident!("body"));
     let body_response = match (&r.rust_type, &r.encoding) {
         (Some(_), Some(BodyEncoding::Bytes { content_type })) => {
             let ct = content_type.as_str();
@@ -269,7 +276,7 @@ fn generate_payload_into_response_arm(
                 let mut response = (
                     #status_code,
                     [(::axum::http::header::CONTENT_TYPE, #ct)],
-                    payload.body,
+                    #body,
                 )
                     .into_response();
             }
@@ -280,7 +287,7 @@ fn generate_payload_into_response_arm(
                 let mut response = (
                     #status_code,
                     #content_type
-                    ::axum::Json(payload.body),
+                    ::axum::Json(#body),
                 )
                     .into_response();
             }
@@ -295,11 +302,11 @@ fn generate_payload_into_response_arm(
     let header_inserts: Vec<TokenStream> = r
         .headers
         .iter()
-        .map(generate_response_header_insert)
+        .map(|h| generate_response_header_insert(h, &field(&h.field_ident)))
         .collect();
 
     quote! {
-        Self::#variant_ident(payload) => {
+        #pattern => {
             #body_response
             let __headers = response.headers_mut();
             #(#header_inserts)*
@@ -308,9 +315,11 @@ fn generate_payload_into_response_arm(
     }
 }
 
-/// Emit code that inserts one declared response header from a payload field.
-fn generate_response_header_insert(header: &ResponseHeaderInfo) -> TokenStream {
-    let field_ident = &header.field_ident;
+/// Emit code that inserts one declared response header, read by `value`.
+fn generate_response_header_insert(
+    header: &ResponseHeaderInfo,
+    value: &TokenStream,
+) -> TokenStream {
     let header_name = &header.name;
 
     let wire_expr = match header.value_kind {
@@ -323,7 +332,7 @@ fn generate_response_header_insert(header: &ResponseHeaderInfo) -> TokenStream {
         quote! {
             if let ::core::result::Result::Ok(__hv) =
                 ::axum::http::HeaderValue::from_str({
-                    let __v = &payload.#field_ident;
+                    let __v = &#value;
                     #wire_expr
                 }.as_str())
             {
@@ -332,7 +341,7 @@ fn generate_response_header_insert(header: &ResponseHeaderInfo) -> TokenStream {
         }
     } else {
         quote! {
-            if let ::core::option::Option::Some(__v) = &payload.#field_ident {
+            if let ::core::option::Option::Some(__v) = &#value {
                 if let ::core::result::Result::Ok(__hv) =
                     ::axum::http::HeaderValue::from_str(#wire_expr.as_str())
                 {
