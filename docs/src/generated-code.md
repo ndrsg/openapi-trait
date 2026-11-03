@@ -29,7 +29,7 @@ schema. The module holds:
 | `Auth` | the operation accepts more than one security scheme |
 | `Status{code}` payload struct (body plus headers) | the response declares headers |
 | `Body`, `Status{code}Body` | the request or response body schema is inline |
-| `{Param}Path`, `{Param}Query` enums | a path or query parameter (or the items of an array query parameter) is an inline enum |
+| `{Param}Path`, `{Param}Query`, `{Param}Header` enums | a path, query or header parameter (or the items of an array query or header parameter) is an inline enum |
 
 Schema types derive `Debug`, `Clone`, `PartialEq`, `Serialize` and
 `Deserialize`. String enums (component schemas and parameter enums) also

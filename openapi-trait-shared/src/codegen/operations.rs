@@ -152,6 +152,21 @@ pub struct ParamInfo {
     pub query: QuerySerialization,
 }
 
+impl ParamInfo {
+    /// True when the parameter's Rust type is a plain `String`, so its wire
+    /// value is used as is instead of being parsed.
+    #[must_use]
+    pub fn is_plain_string(&self) -> bool {
+        is_plain_string_type(&self.rust_type)
+    }
+}
+
+/// True when `ty` is the plain `::std::string::String` type.
+#[must_use]
+pub fn is_plain_string_type(ty: &TokenStream) -> bool {
+    ty.to_string() == quote! { ::std::string::String }.to_string()
+}
+
 /// How a request/response body is encoded on the wire.
 #[derive(Debug, Clone)]
 pub enum BodyEncoding {
@@ -490,12 +505,13 @@ fn collect_params(
             }
         };
 
-        // Only path and query params get a dedicated enum type; header values
-        // are carried as plain strings and cookie params are skipped.
+        // A string-enum param gets a dedicated enum type; cookie params are
+        // skipped.
         let enum_suffix = match param {
             Parameter::Path { .. } => Some("Path"),
             Parameter::Query { .. } => Some("Query"),
-            Parameter::Header { .. } | Parameter::Cookie { .. } => None,
+            Parameter::Header { .. } => Some("Header"),
+            Parameter::Cookie { .. } => None,
         };
         let (is_enum, enum_ident, enum_values) = if let (Some(suffix), Some(schema)) = (
             enum_suffix,
@@ -572,8 +588,8 @@ fn collect_params(
 }
 
 /// The element type of an array parameter, or `None` when the schema isn't an
-/// array. An inline enum element of a query array gets its own type, named
-/// `{Op}{Param}Query` like a scalar query enum.
+/// array. An inline enum element of a query or header array gets its own type,
+/// named `{Param}Query` or `{Param}Header` like a scalar enum.
 fn param_array_item_type(
     param: &Parameter,
     param_schema: Option<&Schema>,
@@ -586,10 +602,17 @@ fn param_array_item_type(
         return Some(quote! { ::openapi_trait::serde_json::Value });
     };
     let items = items.clone().unbox();
-    if !matches!(param, Parameter::Query { .. }) {
-        return Some(non_null_schema_to_rust_type_ctx(&items, true, None, ctx));
-    }
-    let name = format!("{}Query", param.parameter_data_ref().name.to_pascal_case());
+    let suffix = match param {
+        Parameter::Query { .. } => "Query",
+        Parameter::Header { .. } => "Header",
+        Parameter::Path { .. } | Parameter::Cookie { .. } => {
+            return Some(non_null_schema_to_rust_type_ctx(&items, true, None, ctx));
+        }
+    };
+    let name = format!(
+        "{}{suffix}",
+        param.parameter_data_ref().name.to_pascal_case()
+    );
     Some(non_null_schema_to_rust_type_ctx(
         &items,
         true,
@@ -1134,7 +1157,8 @@ fn generate_single_operation_types(
     }
 }
 
-/// Generate enum types for path and query parameters with string enum schemas.
+/// Generate enum types for path, query and header parameters with string enum
+/// schemas.
 ///
 /// Besides the serde derives, each enum gets a `Display` impl that renders the
 /// wire value, so it can be interpolated into a URL path.
@@ -1143,6 +1167,7 @@ fn generate_param_enums(op: &OperationInfo) -> TokenStream {
         .path_params
         .iter()
         .chain(op.query_params.iter())
+        .chain(op.header_params.iter())
         .filter(|p| p.is_enum)
         .map(|p| {
             let ident = p.enum_ident.as_ref().unwrap();
@@ -1238,15 +1263,13 @@ fn generate_request_struct(op: &OperationInfo, binary: &BinaryBodyTypes) -> Toke
 
     for p in &op.header_params {
         let field_ident = &p.field_ident;
-        let fdoc = doc_attr(&p.description);
-        // Header values arrive as strings over the wire. A required header is a
-        // plain `String` so the type system guarantees it is present; an optional
-        // one is `Option<String>` since extraction from a `HeaderMap` can fail.
+        let inner = &p.rust_type;
         let ftype = if p.required {
-            quote! { ::std::string::String }
+            quote! { #inner }
         } else {
-            quote! { ::core::option::Option<::std::string::String> }
+            quote! { ::core::option::Option<#inner> }
         };
+        let fdoc = doc_attr(&p.description);
         fields.push(quote! {
             #fdoc
             pub #field_ident: #ftype,

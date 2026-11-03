@@ -3,7 +3,8 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::{
-    BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo, ResponseHeaderInfo, ResponseStatus,
+    is_plain_string_type, BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo,
+    ResponseHeaderInfo, ResponseStatus,
 };
 use openapi_trait_shared::codegen::security::{
     resolve_alternatives, ApiKeyIn, SchemeInfo, SchemeKind,
@@ -62,20 +63,27 @@ fn route_uses_query(op: &OperationInfo, schemes: &[SchemeInfo]) -> bool {
     !op.query_params.is_empty() || !collect_auth_query_keys(op, schemes).is_empty()
 }
 
+/// True when a header param's value must be parsed with `__query_de` (it isn't
+/// a plain `String` or an array of them).
+fn header_needs_de(p: &ParamInfo) -> bool {
+    !is_plain_string_type(p.query.array_item_type.as_ref().unwrap_or(&p.rust_type))
+}
+
 /// Emit the shared query-parsing helpers, but only the ones some route uses.
 ///
 /// `__parse_query` decodes the raw query into `(name, value)` pairs;
-/// `__query_de` converts a single decoded string into a typed value, trying a
-/// bare JSON parse first (numbers/bools) and falling back to a JSON string
-/// (plain strings, enums, dates, uuids).
+/// `__query_de` converts a single decoded string (a query value or a non-string
+/// header value) into a typed value, trying a bare JSON parse first
+/// (numbers/bools) and falling back to a JSON string (plain strings, enums,
+/// dates, uuids).
 fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> TokenStream {
     let needs_parse = ops.iter().any(|op| route_uses_query(op, schemes));
-    if !needs_parse {
-        return quote! {};
-    }
-    let needs_de = ops.iter().any(|op| !op.query_params.is_empty());
+    let needs_de = ops
+        .iter()
+        .any(|op| !op.query_params.is_empty() || op.header_params.iter().any(header_needs_de));
 
-    let parse = quote! {
+    let parse = if needs_parse {
+        quote! {
         fn __parse_query(
             raw: &::core::option::Option<::std::string::String>,
         ) -> ::std::vec::Vec<(::std::string::String, ::std::string::String)> {
@@ -88,6 +96,9 @@ fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> Toke
                 ::core::option::Option::None => ::std::vec::Vec::new(),
             }
         }
+        }
+    } else {
+        quote! {}
     };
 
     let de = if needs_de {
@@ -359,40 +370,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let (query_extractor, query_stmts, query_fields) = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
-    // Extract spec-defined header params from the HeaderMap. Required headers are
-    // bound up front so a missing one returns 400 before the handler is called;
-    // optional headers map straight into the request struct as `Option<String>`.
-    let mut header_stmts: Vec<TokenStream> = Vec::new();
-    let header_fields: Vec<TokenStream> = op
-        .header_params
-        .iter()
-        .map(|p| {
-            let field_ident = &p.field_ident;
-            let header_name = &p.name;
-            if p.required {
-                header_stmts.push(quote! {
-                    let #field_ident = match headers
-                        .get(#header_name)
-                        .and_then(|v| v.to_str().ok())
-                    {
-                        ::core::option::Option::Some(v) => ::std::string::String::from(v),
-                        ::core::option::Option::None => {
-                            let msg = ::std::format!("missing required header `{}`", #header_name);
-                            return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
-                        }
-                    };
-                });
-                quote! { #field_ident, }
-            } else {
-                quote! {
-                    #field_ident: headers
-                        .get(#header_name)
-                        .and_then(|v| v.to_str().ok())
-                        .map(::std::string::String::from),
-                }
-            }
-        })
-        .collect();
+    let (header_stmts, header_fields) = build_header_extractor(op);
 
     let mut closure_params: Vec<TokenStream> = vec![quote! { headers: ::axum::http::HeaderMap }];
     if let Some(p) = path_extractor {
@@ -434,6 +412,86 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
             }
         }))
     }
+}
+
+/// Build the statements that read an operation's header params from the
+/// `HeaderMap`, and the matching request-struct fields.
+///
+/// Every header is bound up front, so a missing required header or a value
+/// that doesn't parse as the declared type returns 400 before the handler is
+/// called. A plain `String` header is taken as is; any other type is parsed
+/// like a query scalar, and an array is split on `,` (`style: simple`).
+fn build_header_extractor(op: &OperationInfo) -> (Vec<TokenStream>, Vec<TokenStream>) {
+    op.header_params
+        .iter()
+        .map(|p| {
+            let field_ident = &p.field_ident;
+            let header_name = &p.name;
+            let convert = header_value_conversion(p);
+            let present = quote! {
+                match (#convert)(__raw) {
+                    ::core::option::Option::Some(v) => v,
+                    ::core::option::Option::None => {
+                        let msg = ::std::format!("invalid header `{}`", #header_name);
+                        return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+                    }
+                }
+            };
+            let missing = if p.required {
+                quote! {
+                    {
+                        let msg = ::std::format!("missing required header `{}`", #header_name);
+                        return (::axum::http::StatusCode::BAD_REQUEST, msg).into_response();
+                    }
+                }
+            } else {
+                quote! { ::core::option::Option::None }
+            };
+            let present = if p.required {
+                present
+            } else {
+                quote! { ::core::option::Option::Some(#present) }
+            };
+            let stmt = quote! {
+                let #field_ident = match headers
+                    .get(#header_name)
+                    .and_then(|v| v.to_str().ok())
+                {
+                    ::core::option::Option::Some(__raw) => #present,
+                    ::core::option::Option::None => #missing,
+                };
+            };
+            (stmt, quote! { #field_ident, })
+        })
+        .unzip()
+}
+
+/// A closure `|&str| -> Option<T>` that converts a raw header value into the
+/// parameter's Rust type `T`.
+fn header_value_conversion(p: &ParamInfo) -> TokenStream {
+    let scalar = |ty: &TokenStream| {
+        if is_plain_string_type(ty) {
+            quote! { |s: &str| ::core::option::Option::Some(::std::string::String::from(s)) }
+        } else {
+            quote! { |s: &str| __query_de::<#ty>(s) }
+        }
+    };
+    p.query.array_item_type.as_ref().map_or_else(
+        || scalar(&p.rust_type),
+        |item_ty| {
+            let item = scalar(item_ty);
+            quote! {
+                |s: &str| {
+                    if s.trim().is_empty() {
+                        return ::core::option::Option::Some(::std::vec::Vec::new());
+                    }
+                    s.split(',')
+                        .map(|part| (#item)(part.trim()))
+                        .collect::<::core::option::Option<::std::vec::Vec<_>>>()
+                }
+            }
+        },
+    )
 }
 
 /// Build the auth extraction block + the call-site argument for an operation.
