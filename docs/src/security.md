@@ -17,7 +17,7 @@ These rules decide which operations require credentials:
 - `security: []` turns auth off for an operation (`listPets` in the example
   spec).
 - If an operation lists several alternatives (an OR), the macro generates an
-  `{OperationId}Auth` enum with one variant per scheme.
+  `{operation}::Auth` enum with one variant per scheme.
 - An empty requirement (`security: [{}, {bearerAuth: []}]`) makes auth
   optional: the server passes `Option<…>` to the handler, with `None` for an
   anonymous request, instead of returning 401, and the client sends a
@@ -40,14 +40,14 @@ With alternatives, match on the generated enum:
 ```rust,ignore
 async fn get_flex(
     &self,
-    _req: api::GetFlexRequest,
-    auth: api::GetFlexAuth,
+    _req: api::get_flex::Request,
+    auth: api::get_flex::Auth,
     _state: axum::extract::State<()>,
     _headers: axum::http::HeaderMap,
-) -> Result<api::GetFlexResponse, Self::Error> {
+) -> Result<api::get_flex::Response, Self::Error> {
     let who = match auth {
-        api::GetFlexAuth::BearerAuth(token) => token.0,
-        api::GetFlexAuth::BasicAuth(basic) => basic.username,
+        api::get_flex::Auth::BearerAuth(token) => token.0,
+        api::get_flex::Auth::BasicAuth(basic) => basic.username,
     };
     // ...
 }

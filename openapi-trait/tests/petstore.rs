@@ -21,14 +21,14 @@ fn router_compiles() {
 
 #[test]
 fn get_pet_by_id_request_has_pet_id_field() {
-    let req = petstore::GetPetByIdRequest { pet_id: 42 };
+    let req = petstore::get_pet_by_id::Request { pet_id: 42 };
     assert_eq!(req.pet_id, 42);
 }
 
 #[test]
 fn find_pets_by_status_uses_enum_query() {
-    let req = petstore::FindPetsByStatusRequest {
-        status: petstore::FindPetsByStatusStatusQuery::Available,
+    let req = petstore::find_pets_by_status::Request {
+        status: petstore::find_pets_by_status::StatusQuery::Available,
     };
     let _ = req;
 }
@@ -83,22 +83,24 @@ impl petstore::PetstoreApi for RichMockPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore::GetPetByIdRequest,
-        _auth: petstore::GetPetByIdAuth,
+        req: petstore::get_pet_by_id::Request,
+        _auth: petstore::get_pet_by_id::Auth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
+    ) -> Result<petstore::get_pet_by_id::Response, Self::Error> {
         if req.pet_id == 42 {
-            Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
-                id: Some(42),
-                name: "doggie".into(),
-                photo_urls: vec!["https://example.com/photo.jpg".into()],
-                category: None,
-                tags: None,
-                status: None,
-            }))
+            Ok(petstore::get_pet_by_id::Response::Status200(
+                petstore::Pet {
+                    id: Some(42),
+                    name: "doggie".into(),
+                    photo_urls: vec!["https://example.com/photo.jpg".into()],
+                    category: None,
+                    tags: None,
+                    status: None,
+                },
+            ))
         } else {
-            Ok(petstore::GetPetByIdResponse::Status404)
+            Ok(petstore::get_pet_by_id::Response::Status404)
         }
     }
 }

@@ -39,7 +39,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let created = client
         .create_pet(
-            pets::CreatePetRequest {
+            pets::create_pet::Request {
                 body: pets::NewPet {
                     name: "doggie".into(),
                     status: Some(pets::PetStatus::Available),
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("created: {created:?}");
 
     let all = client
-        .list_pets(pets::ListPetsRequest { limit: Some(10) }, None)
+        .list_pets(pets::list_pets::Request { limit: Some(10) }, None)
         .await?;
     println!("listed: {all:?}");
     // ANCHOR_END: usage
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ANCHOR: options
     let pet = client
         .get_pet(
-            pets::GetPetRequest { pet_id: 1 },
+            pets::get_pet::Request { pet_id: 1 },
             Some(
                 openapi_trait::RequestOptions::new()
                     .bearer_auth("another-token")

@@ -16,7 +16,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | `allOf` | ✅ one merged struct: `$ref` branches via `#[serde(flatten)]`, inline objects inlined |
 | `anyOf` | ✅ `#[serde(untagged)]` enum |
 | Inline objects, enums and compositions in properties | ✅ lifted to `{ParentStruct}{Property}` |
-| Inline request and response body schemas | ✅ lifted to `{OperationId}Body` and `{OperationId}Status{code}Body` |
+| Inline request and response body schemas | ✅ `Body` and `Status{code}Body` in the operation's module |
 | Recursive schemas | ✅ the field that closes a cycle becomes `Box<T>` (`Option<Box<T>>` when optional); references inside arrays and maps aren't boxed |
 | `not`, unconstrained schemas | fall back to `serde_json::Value` |
 | Constraints (`minLength`, `minimum`, `pattern`, …) | ✅ with the [`validation`](validation.md) feature |

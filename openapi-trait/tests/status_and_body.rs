@@ -16,32 +16,32 @@ impl sb::SbApi for Server {
 
     async fn get_partial(
         &self,
-        req: sb::GetPartialRequest,
+        req: sb::get_partial::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sb::GetPartialResponse, Self::Error> {
+    ) -> Result<sb::get_partial::Response, Self::Error> {
         Ok(match req.which {
-            206 => sb::GetPartialResponse::Status206("part".into()),
-            308 => sb::GetPartialResponse::Status308,
-            _ => sb::GetPartialResponse::Status418,
+            206 => sb::get_partial::Response::Status206("part".into()),
+            308 => sb::get_partial::Response::Status308,
+            _ => sb::get_partial::Response::Status418,
         })
     }
 
     async fn opt_body(
         &self,
-        req: sb::OptBodyRequest,
+        req: sb::opt_body::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sb::OptBodyResponse, Self::Error> {
-        Ok(sb::OptBodyResponse::Status200(format!("{:?}", req.body)))
+    ) -> Result<sb::opt_body::Response, Self::Error> {
+        Ok(sb::opt_body::Response::Status200(format!("{:?}", req.body)))
     }
 
     async fn opt_bin_body(
         &self,
-        req: sb::OptBinBodyRequest,
+        req: sb::opt_bin_body::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sb::OptBinBodyResponse, Self::Error> {
+    ) -> Result<sb::opt_bin_body::Response, Self::Error> {
         let text = match req.body {
             None => "none".to_owned(),
             Some(body) => {
@@ -49,7 +49,7 @@ impl sb::SbApi for Server {
                 format!("some:{}", String::from_utf8_lossy(&bytes))
             }
         };
-        Ok(sb::OptBinBodyResponse::Status200(text))
+        Ok(sb::opt_bin_body::Response::Status200(text))
     }
 }
 

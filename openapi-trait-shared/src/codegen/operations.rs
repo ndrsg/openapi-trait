@@ -10,10 +10,11 @@ use quote::{format_ident, quote};
 use super::ctx::CodegenCtx;
 use super::idents;
 use super::schemas::doc_attr;
-use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
+use super::security::{
+    generate_op_auth_enum, resolve_alternatives, resolve_op_security, OpSecurity, SchemeInfo,
+};
 use super::types::{
-    is_string_enum, non_null_schema_to_rust_type, non_null_schema_to_rust_type_ctx,
-    schema_to_rust_type_ctx, string_enum_values,
+    is_string_enum, non_null_schema_to_rust_type_ctx, schema_to_rust_type_ctx, string_enum_values,
 };
 
 /// All information about a single API operation needed by later codegen stages.
@@ -33,7 +34,54 @@ pub struct OperationInfo {
     pub body: Option<BodyInfo>,
     pub responses: Vec<ResponseInfo>,
     pub auth: OpSecurity,
+    /// Module holding the operation's types (`Request`, `Response`, …); the
+    /// same identifier as [`Self::method_ident`].
+    pub module_ident: syn::Ident,
+    /// Types synthesized for the operation's inline schemas (bodies, enum
+    /// array items), emitted into its module.
+    pub inline_types: Vec<TokenStream>,
 }
+
+impl OperationInfo {
+    /// Path to the type `name` in this operation's module, valid at the
+    /// macro module's top level: `create_pet::Request`.
+    #[must_use]
+    pub fn type_path(&self, name: &str) -> TokenStream {
+        let module = &self.module_ident;
+        let ident = format_ident!("{name}");
+        quote! { #module::#ident }
+    }
+
+    /// Path to the operation's request struct: `create_pet::Request`.
+    #[must_use]
+    pub fn request_path(&self) -> TokenStream {
+        self.type_path("Request")
+    }
+
+    /// Path to the operation's response enum: `create_pet::Response`.
+    #[must_use]
+    pub fn response_path(&self) -> TokenStream {
+        self.type_path("Response")
+    }
+
+    /// Path to the operation's auth enum: `create_pet::Auth`.
+    #[must_use]
+    pub fn auth_path(&self) -> TokenStream {
+        self.type_path(AUTH_TYPE)
+    }
+
+    /// Path to the payload struct of the response `status`, which exists
+    /// when that response declares headers: `create_pet::Status201`.
+    #[must_use]
+    pub fn payload_path(&self, status: u16) -> TokenStream {
+        let module = &self.module_ident;
+        let ident = response_payload_ident(status);
+        quote! { #module::#ident }
+    }
+}
+
+/// Name of the per-operation auth enum.
+pub const AUTH_TYPE: &str = "Auth";
 
 /// How a query parameter's array (or object) value is delimited on the wire,
 /// derived from the `OpenAPI` `style` keyword for `in: query` parameters.
@@ -212,14 +260,11 @@ fn response_body_type(r: &ResponseInfo, binary: &BinaryBodyTypes) -> Option<Toke
     })
 }
 
-/// Ident for a response payload struct when an operation declares response headers.
+/// Ident for a response payload struct when an operation declares response
+/// headers: `Status{status}`, in the operation's module.
 #[must_use]
-pub fn response_payload_ident(operation_id: &str, status: u16) -> syn::Ident {
-    format_ident!(
-        "{}{}",
-        operation_id.to_pascal_case(),
-        format!("Status{status}")
-    )
+pub fn response_payload_ident(status: u16) -> syn::Ident {
+    format_ident!("Status{status}")
 }
 
 #[derive(Debug)]
@@ -357,10 +402,6 @@ fn build_operation_info(
             return None;
         }
     };
-    if let Err(msg) = idents::validate_type_base(&operation_id) {
-        diag.error(format!("operation `{method} {path}`: {msg}"));
-        return None;
-    }
 
     // Collect parameters: path-level then operation-level; `collect_params`
     // lets an operation-level param override a path-level one with the same
@@ -368,15 +409,33 @@ fn build_operation_info(
     let mut all_params: Vec<&ReferenceOr<Parameter>> = Vec::new();
     all_params.extend(path_item.parameters.iter());
     all_params.extend(operation.parameters.iter());
-    let (path_params, query_params, header_params) =
-        collect_params(&all_params, &operation_id, method, path, openapi, ctx, diag)?;
 
-    let body = operation
-        .request_body
-        .as_ref()
-        .and_then(|rb| build_body_info(rb, openapi, &operation_id, ctx, diag));
-
-    let responses = build_responses(&operation.responses, openapi, &operation_id, ctx, diag);
+    // The operation's types live in their own module, so they only need to
+    // avoid each other.
+    let module_ident = method_ident.clone();
+    let reserved = ["Request", "Response", AUTH_TYPE]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            operation
+                .responses
+                .responses
+                .keys()
+                .filter_map(|status| match status {
+                    StatusCode::Code(n) => Some(response_payload_ident(*n).to_string()),
+                    StatusCode::Range(_) => None,
+                }),
+        );
+    let (collected, inline_types) = ctx.with_operation(&module_ident, reserved, |ctx| {
+        let params = collect_params(&all_params, &operation_id, method, path, openapi, ctx, diag)?;
+        let body = operation
+            .request_body
+            .as_ref()
+            .and_then(|rb| build_body_info(rb, openapi, &operation_id, ctx, diag));
+        let responses = build_responses(&operation.responses, openapi, &operation_id, ctx, diag);
+        Some((params, body, responses))
+    });
+    let ((path_params, query_params, header_params), body, responses) = collected?;
     let auth = resolve_op_security(operation, openapi, schemes);
 
     Some(OperationInfo {
@@ -392,6 +451,8 @@ fn build_operation_info(
         body,
         responses,
         auth,
+        module_ident,
+        inline_types,
     })
 }
 
@@ -440,11 +501,7 @@ fn collect_params(
             enum_suffix,
             param_schema.as_ref().filter(|s| is_string_enum(s)),
         ) {
-            let name = ctx.reserve_type_name(&format!(
-                "{}{}{suffix}",
-                operation_id.to_pascal_case(),
-                data.name.to_pascal_case()
-            ));
+            let name = ctx.reserve_type_name(&format!("{}{suffix}", data.name.to_pascal_case()));
             let ident = match idents::type_ident(&name, operation_id) {
                 Ok(id) => id,
                 Err(msg) => {
@@ -458,17 +515,15 @@ fn collect_params(
             (false, None, vec![])
         };
 
-        let array_item_type =
-            param_array_item_type(param, param_schema.as_ref(), operation_id, ctx);
+        let array_item_type = param_array_item_type(param, param_schema.as_ref(), ctx);
 
         let rust_type = if is_enum {
-            let ei = enum_ident.as_ref().unwrap();
-            quote! { #ei }
+            ctx.local_type(enum_ident.as_ref().unwrap())
         } else if let Some(item) = &array_item_type {
             quote! { ::std::vec::Vec<#item> }
         } else if let Some(schema) = &param_schema {
             let ref_or = ReferenceOr::Item(schema.clone());
-            non_null_schema_to_rust_type(&ref_or, true)
+            non_null_schema_to_rust_type_ctx(&ref_or, true, None, ctx)
         } else {
             quote! { ::std::string::String }
         };
@@ -522,7 +577,6 @@ fn collect_params(
 fn param_array_item_type(
     param: &Parameter,
     param_schema: Option<&Schema>,
-    operation_id: &str,
     ctx: &mut CodegenCtx,
 ) -> Option<TokenStream> {
     let Some(SchemaKind::Type(Type::Array(arr))) = param_schema.map(|s| &s.schema_kind) else {
@@ -533,13 +587,9 @@ fn param_array_item_type(
     };
     let items = items.clone().unbox();
     if !matches!(param, Parameter::Query { .. }) {
-        return Some(non_null_schema_to_rust_type(&items, true));
+        return Some(non_null_schema_to_rust_type_ctx(&items, true, None, ctx));
     }
-    let name = format!(
-        "{}{}Query",
-        operation_id.to_pascal_case(),
-        param.parameter_data_ref().name.to_pascal_case()
-    );
+    let name = format!("{}Query", param.parameter_data_ref().name.to_pascal_case());
     Some(non_null_schema_to_rust_type_ctx(
         &items,
         true,
@@ -683,8 +733,7 @@ fn build_body_info(
         }
     };
 
-    let body_name = format!("{}Body", op_id.to_pascal_case());
-    let Some(resolved) = media_type_to_rust(&rb.content, &body_name, ctx) else {
+    let Some(resolved) = media_type_to_rust(&rb.content, "Body", ctx) else {
         if !rb.content.is_empty() {
             let types: Vec<&str> = rb.content.keys().map(String::as_str).collect();
             diag.warn(format!(
@@ -834,9 +883,15 @@ const fn classify_header_schema(ref_or: &ReferenceOr<Schema>) -> HeaderValueKind
 }
 
 /// Map a response header schema to its Rust type.
-fn header_schema_to_rust(format: &ParameterSchemaOrContent, required: bool) -> TokenStream {
+fn header_schema_to_rust(
+    format: &ParameterSchemaOrContent,
+    required: bool,
+    ctx: &mut CodegenCtx,
+) -> TokenStream {
     match format {
-        ParameterSchemaOrContent::Schema(ref_or) => non_null_schema_to_rust_type(ref_or, required),
+        ParameterSchemaOrContent::Schema(ref_or) => {
+            non_null_schema_to_rust_type_ctx(ref_or, required, None, ctx)
+        }
         ParameterSchemaOrContent::Content(_) => {
             if required {
                 quote! { ::std::string::String }
@@ -852,6 +907,7 @@ fn build_response_headers(
     resp: &Response,
     op_id: &str,
     openapi: &OpenAPI,
+    ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Vec<ResponseHeaderInfo> {
     let mut out = Vec::new();
@@ -886,7 +942,7 @@ fn build_response_headers(
             }
         };
 
-        let rust_type = header_schema_to_rust(&header.format, header.required);
+        let rust_type = header_schema_to_rust(&header.format, header.required, ctx);
 
         let value_kind = match &header.format {
             ParameterSchemaOrContent::Schema(ref_or) => classify_header_schema(ref_or),
@@ -955,10 +1011,10 @@ fn build_responses(
             }
         };
 
-        let headers = build_response_headers(resp, op_id, openapi, diag);
+        let headers = build_response_headers(resp, op_id, openapi, ctx, diag);
         let media = response_media_type_to_rust(
             &resp.content,
-            &format!("{}Status{n}Body", op_id.to_pascal_case()),
+            &format!("Status{n}Body"),
             ctx,
             op_id,
             &format!("status `{n}`"),
@@ -1027,23 +1083,48 @@ pub fn generate_operation_errors(errors: &[String]) -> TokenStream {
 
 /// Generate query-param enum types + request structs + response enums for all operations.
 #[must_use]
-pub fn generate_operation_types(ops: &[OperationInfo], binary: &BinaryBodyTypes) -> TokenStream {
+pub fn generate_operation_types(
+    ops: &[OperationInfo],
+    binary: &BinaryBodyTypes,
+    schemes: &[SchemeInfo],
+) -> TokenStream {
     let items: Vec<TokenStream> = ops
         .iter()
-        .map(|op| generate_single_operation_types(op, binary))
+        .map(|op| generate_single_operation_types(op, binary, schemes))
         .collect();
     quote! { #(#items)* }
 }
 
-/// Generate all types for a single operation.
-fn generate_single_operation_types(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
+/// Generate the module holding all types of a single operation.
+///
+/// Inside it, references to anything outside go through
+/// [`super::ctx::ROOT_MODULE`], so a schema named `Request` still resolves to
+/// the schema, not to the operation's `Request`.
+fn generate_single_operation_types(
+    op: &OperationInfo,
+    binary: &BinaryBodyTypes,
+    schemes: &[SchemeInfo],
+) -> TokenStream {
+    let module = &op.module_ident;
+    let root = format_ident!("{}", super::ctx::ROOT_MODULE);
+    let doc = combined_doc(op.summary.as_ref(), op.description.as_ref());
     let param_enums = generate_param_enums(op);
+    let inline_types = &op.inline_types;
+    let auth_enum = generate_op_auth_enum(&resolve_alternatives(&op.auth, schemes));
     let request_struct = generate_request_struct(op, binary);
     let response_enum = generate_response_enum(op, binary);
     quote! {
-        #param_enums
-        #request_struct
-        #response_enum
+        #doc
+        pub mod #module {
+            #[allow(unused_imports)]
+            use super::#root;
+
+            #param_enums
+            #(#inline_types)*
+            #auth_enum
+            #request_struct
+            #response_enum
+        }
     }
 }
 
@@ -1109,7 +1190,7 @@ fn generate_param_enums(op: &OperationInfo) -> TokenStream {
 
 /// Generate the request struct for an operation.
 fn generate_request_struct(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
-    let ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
+    let ident = format_ident!("Request");
     let doc = combined_doc(op.summary.as_ref(), op.description.as_ref());
     let clone_derive = if op_has_binary_request_body(op) {
         quote! { #[derive(::core::fmt::Debug)] }
@@ -1181,7 +1262,7 @@ fn generate_request_struct(op: &OperationInfo, binary: &BinaryBodyTypes) -> Toke
 
 /// Generate the response enum and any payload structs for an operation.
 fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
-    let ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
+    let ident = format_ident!("Response");
     let doc = combined_doc(op.summary.as_ref(), op.description.as_ref());
     let clone_derive = if op_has_binary_response_body(op) {
         quote! { #[derive(::core::fmt::Debug)] }
@@ -1194,7 +1275,7 @@ fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> Token
         .iter()
         .filter(|r| !r.headers.is_empty())
         .filter_map(|r| match r.status {
-            ResponseStatus::Code(n) => Some(generate_response_payload_struct(op, r, n, binary)),
+            ResponseStatus::Code(n) => Some(generate_response_payload_struct(r, n, binary)),
             ResponseStatus::Default => None,
         })
         .collect();
@@ -1223,7 +1304,7 @@ fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> Token
                             },
                         )
                     } else {
-                        let payload_ident = response_payload_ident(&op.operation_id, *n);
+                        let payload_ident = response_payload_ident(*n);
                         quote! {
                             #vdoc
                             #variant_ident(#payload_ident)
@@ -1252,12 +1333,11 @@ fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> Token
 
 /// Generate a payload struct for a response that declares headers.
 fn generate_response_payload_struct(
-    op: &OperationInfo,
     r: &ResponseInfo,
     status: u16,
     binary: &BinaryBodyTypes,
 ) -> TokenStream {
-    let ident = response_payload_ident(&op.operation_id, status);
+    let ident = response_payload_ident(status);
     let clone_derive = if matches!(r.encoding, Some(BodyEncoding::Bytes { .. })) {
         quote! { #[derive(::core::fmt::Debug)] }
     } else {
@@ -1706,7 +1786,7 @@ paths:
         assert!(matches!(resp.encoding, Some(BodyEncoding::Bytes { .. })));
         let enum_src = generate_response_enum(&ops[0], &test_binary_types()).to_string();
         assert!(
-            enum_src.contains("DownloadFileStatus200"),
+            enum_src.contains("pub struct Status200"),
             "headers should produce a payload struct: {enum_src}"
         );
         assert!(

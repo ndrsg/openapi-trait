@@ -32,12 +32,12 @@ impl pets::PetsApi for PetServer {
 
     async fn get_pet(
         &self,
-        req: pets::GetPetRequest,
+        req: pets::get_pet::Request,
         _auth: pets::BearerAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pets::GetPetResponse, Self::Error> {
-        Ok(pets::GetPetResponse::Status200(pets::Pet {
+    ) -> Result<pets::get_pet::Response, Self::Error> {
+        Ok(pets::get_pet::Response::Status200(pets::Pet {
             id: req.pet_id,
             name: "doggie".into(),
             status: None,
@@ -75,7 +75,7 @@ let client = PetsHttpClient {
 }
 .with_bearer_auth("secret");
 
-let pet = client.get_pet(pets::GetPetRequest { pet_id: 1 }, None).await?;
+let pet = client.get_pet(pets::get_pet::Request { pet_id: 1 }, None).await?;
 ```
 
 `pets::PetsClient` is a plain trait, so you can also implement it yourself as a
@@ -89,8 +89,9 @@ Runnable versions of both examples are in
 - **Models.** Structs and enums from `components/schemas`, including
   `oneOf`/`anyOf`/`allOf`, `additionalProperties`, and `date-time`/`uuid`
   formats.
-- **Typed operations.** A `{Op}Request` struct for path, query, header and body
-  inputs, and a `{Op}Response` enum with one variant per status code.
+- **Typed operations.** A module per operation with a `Request` struct for
+  path, query, header and body inputs, and a `Response` enum with one variant
+  per status code.
 - **Security.** `apiKey`, HTTP bearer and HTTP basic. On the server,
   credentials are extracted and missing ones get a `401`. On the client, they
   are injected into every call.

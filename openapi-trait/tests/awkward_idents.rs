@@ -36,32 +36,32 @@ impl awk_client::AwkClientClient for ClientImpl {
 
     async fn r#type(
         &self,
-        _req: awk_client::TypeRequest,
+        _req: awk_client::r#type::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<awk_client::TypeResponse, Self::Error> {
-        Ok(awk_client::TypeResponse::Status200)
+    ) -> Result<awk_client::r#type::Response, Self::Error> {
+        Ok(awk_client::r#type::Response::Status200)
     }
 
     async fn list_pets(
         &self,
-        _req: awk_client::ListPetsRequest,
+        _req: awk_client::list_pets::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<awk_client::ListPetsResponse, Self::Error> {
-        Ok(awk_client::ListPetsResponse::Status200)
+    ) -> Result<awk_client::list_pets::Response, Self::Error> {
+        Ok(awk_client::list_pets::Response::Status200)
     }
 
     async fn list_versions(
         &self,
-        _req: awk_client::ListVersionsRequest,
+        _req: awk_client::list_versions::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<awk_client::ListVersionsResponse, Self::Error> {
-        Ok(awk_client::ListVersionsResponse::Status200)
+    ) -> Result<awk_client::list_versions::Response, Self::Error> {
+        Ok(awk_client::list_versions::Response::Status200)
     }
 }
 
 #[test]
 fn keyword_parameter_becomes_a_raw_struct_field() {
-    let req = awk_client::TypeRequest {
+    let req = awk_client::r#type::Request {
         r#type: Some("x".into()),
     };
     assert_eq!(req.r#type.as_deref(), Some("x"));
@@ -72,16 +72,16 @@ async fn raw_keyword_method_is_callable() {
     let client = ClientImpl;
 
     let resp = client
-        .r#type(awk_client::TypeRequest { r#type: None }, None)
+        .r#type(awk_client::r#type::Request { r#type: None }, None)
         .await
         .unwrap();
-    assert!(matches!(resp, awk_client::TypeResponse::Status200));
+    assert!(matches!(resp, awk_client::r#type::Response::Status200));
 
     let resp = client
-        .list_pets(awk_client::ListPetsRequest {}, None)
+        .list_pets(awk_client::list_pets::Request {}, None)
         .await
         .unwrap();
-    assert!(matches!(resp, awk_client::ListPetsResponse::Status200));
+    assert!(matches!(resp, awk_client::list_pets::Response::Status200));
 }
 
 // ---- `KNOWN_ISSUES.md` C3: enum values / schema names that aren't identifiers ----
@@ -143,8 +143,8 @@ fn non_identifier_schema_names_are_repaired() {
 
 #[test]
 fn non_identifier_query_enum_values_are_repaired() {
-    let _ = awk_client::ListVersionsRequest {
-        v: awk_client::ListVersionsVQuery::V1_0,
+    let _ = awk_client::list_versions::Request {
+        v: awk_client::list_versions::VQuery::V1_0,
     };
-    let _ = awk_server::ListVersionsVQuery::Empty;
+    let _ = awk_server::list_versions::VQuery::Empty;
 }

@@ -52,7 +52,7 @@ fn required_nullable_fields_accept_values() {
 #[test]
 fn nullable_query_param_stays_plain() {
     // A query string can't carry JSON `null`, so `nullable` doesn't apply.
-    let req = example::ListThingsRequest {
+    let req = example::list_things::Request {
         tag: String::from("x"),
     };
     assert_eq!(req.tag, "x");

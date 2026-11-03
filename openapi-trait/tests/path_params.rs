@@ -20,11 +20,11 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_swapped(
         &self,
-        req: pp_server::GetSwappedRequest,
+        req: pp_server::get_swapped::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pp_server::GetSwappedResponse, Self::Error> {
-        Ok(pp_server::GetSwappedResponse::Status200(format!(
+    ) -> Result<pp_server::get_swapped::Response, Self::Error> {
+        Ok(pp_server::get_swapped::Response::Status200(format!(
             "a={} b={}",
             req.a, req.b
         )))
@@ -32,13 +32,13 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_typed(
         &self,
-        req: pp_server::GetTypedRequest,
+        req: pp_server::get_typed::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pp_server::GetTypedResponse, Self::Error> {
+    ) -> Result<pp_server::get_typed::Response, Self::Error> {
         // `id` is an `i64`: this only compiles if the field kept its type.
         let id: i64 = req.id;
-        Ok(pp_server::GetTypedResponse::Status200(format!(
+        Ok(pp_server::get_typed::Response::Status200(format!(
             "id={id} slug={}",
             req.slug
         )))
@@ -46,26 +46,26 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_thing(
         &self,
-        req: pp_server::GetThingRequest,
+        req: pp_server::get_thing::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pp_server::GetThingResponse, Self::Error> {
+    ) -> Result<pp_server::get_thing::Response, Self::Error> {
         let kind = match req.kind {
-            pp_server::GetThingKindPath::A => "A",
-            pp_server::GetThingKindPath::B => "B",
-            pp_server::GetThingKindPath::XY => "XY",
+            pp_server::get_thing::KindPath::A => "A",
+            pp_server::get_thing::KindPath::B => "B",
+            pp_server::get_thing::KindPath::XY => "XY",
         };
-        Ok(pp_server::GetThingResponse::Status200(kind.to_owned()))
+        Ok(pp_server::get_thing::Response::Status200(kind.to_owned()))
     }
 
     async fn get_dup(
         &self,
-        req: pp_server::GetDupRequest,
+        req: pp_server::get_dup::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pp_server::GetDupResponse, Self::Error> {
+    ) -> Result<pp_server::get_dup::Response, Self::Error> {
         let id: i64 = req.id;
-        Ok(pp_server::GetDupResponse::Status200(id * 2))
+        Ok(pp_server::get_dup::Response::Status200(id * 2))
     }
 }
 
@@ -114,7 +114,7 @@ async fn enum_path_param_is_deserialized_by_wire_value() {
 
 #[test]
 fn enum_path_param_displays_its_wire_value() {
-    assert_eq!(pp_server::GetThingKindPath::XY.to_string(), "x-y");
+    assert_eq!(pp_server::get_thing::KindPath::XY.to_string(), "x-y");
 }
 
 #[tokio::test]
@@ -146,18 +146,18 @@ mod client {
 
         let resp = client
             .get_thing(
-                pp_client::GetThingRequest {
-                    kind: pp_client::GetThingKindPath::B,
+                pp_client::get_thing::Request {
+                    kind: pp_client::get_thing::KindPath::B,
                 },
                 None,
             )
             .await
             .unwrap();
-        assert!(matches!(resp, pp_client::GetThingResponse::Status200(ref s) if s == "B"));
+        assert!(matches!(resp, pp_client::get_thing::Response::Status200(ref s) if s == "B"));
 
         let resp = client
             .get_swapped(
-                pp_client::GetSwappedRequest {
+                pp_client::get_swapped::Request {
                     b: "BBB".into(),
                     a: "AAA".into(),
                 },
@@ -166,13 +166,13 @@ mod client {
             .await
             .unwrap();
         assert!(
-            matches!(resp, pp_client::GetSwappedResponse::Status200(ref s) if s == "a=AAA b=BBB")
+            matches!(resp, pp_client::get_swapped::Response::Status200(ref s) if s == "a=AAA b=BBB")
         );
 
         let resp = client
-            .get_dup(pp_client::GetDupRequest { id: 5 }, None)
+            .get_dup(pp_client::get_dup::Request { id: 5 }, None)
             .await
             .unwrap();
-        assert!(matches!(resp, pp_client::GetDupResponse::Status200(10)));
+        assert!(matches!(resp, pp_client::get_dup::Response::Status200(10)));
     }
 }

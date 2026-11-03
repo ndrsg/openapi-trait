@@ -3,7 +3,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::OperationInfo;
-use openapi_trait_shared::codegen::security::{auth_enum_ident, resolve_alternatives, SchemeInfo};
+use openapi_trait_shared::codegen::security::{resolve_alternatives, SchemeInfo};
 
 /// Generate the `{ModName}Api` trait with one `async fn` per operation,
 /// preceded by the per-module `NotImplemented` marker that the trait's default
@@ -69,8 +69,8 @@ pub fn generate_trait(
 /// Generate a single trait method for one operation.
 fn generate_trait_method(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let method_ident = &op.method_ident;
-    let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
-    let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
+    let req_ident = op.request_path();
+    let resp_ident = op.response_path();
 
     let doc = match (&op.summary, &op.description) {
         (Some(s), Some(d)) if s != d => quote! { #[doc = #s] #[doc = ""] #[doc = #d] },
@@ -86,10 +86,7 @@ fn generate_trait_method(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStr
             let ty = &alts[0].ident;
             Some(quote! { #ty })
         }
-        _ => {
-            let ty = auth_enum_ident(&op.operation_id);
-            Some(quote! { #ty })
-        }
+        _ => Some(op.auth_path()),
     };
     // With optional auth (`security: [{}, …]`) the handler gets `None` for an
     // anonymous request.

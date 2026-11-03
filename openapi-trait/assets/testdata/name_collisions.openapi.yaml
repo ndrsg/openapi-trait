@@ -1,5 +1,7 @@
-# Regression fixture for KNOWN_ISSUES.md C5: names synthesized for inline
-# schemas must not collide with component schemas or operation types.
+# Regression fixture for KNOWN_ISSUES.md C5: type names must not collide.
+# Names synthesized for inline schemas get a numeric suffix when a component
+# schema already has them; operation types live in their own module, so a
+# schema can share their name.
 openapi: 3.0.1
 info:
   title: name_collisions
@@ -9,21 +11,45 @@ paths:
     post:
       operationId: createThing
       parameters:
-        # Would be `CreateThingKindPath`, which is a component schema below.
+        # `create_thing::KindPath`, next to the `CreateThingKindPath` schema.
         - { name: kind, in: path, required: true, schema: { type: string, enum: [a, b] } }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/CreateThing' }
+            # Named like the operation's request struct.
+            schema: { $ref: '#/components/schemas/CreateThingRequest' }
       responses:
         '200':
           description: ok
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/Person' }
+              # Named like the response enum inside the operation's module.
+              schema: { $ref: '#/components/schemas/Response' }
+        '400':
+          description: rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Request' }
 components:
   schemas:
+    CreateThingRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    Request:
+      type: object
+      properties:
+        reason: { type: string }
+    Response:
+      type: object
+      properties:
+        id: { type: integer }
+    CreateThingKindPath:
+      type: object
+      properties:
+        w: { type: string }
     # `Person.address` would be named `PersonAddress`, which is taken.
     PersonAddress:
       type: object
@@ -36,15 +62,6 @@ components:
           type: object
           properties:
             y: { type: string }
-    # `CreateThing.request` would be named `CreateThingRequest`, which is the
-    # request struct of operation `createThing`.
-    CreateThing:
-      type: object
-      properties:
-        request:
-          type: object
-          properties:
-            z: { type: string }
     # The extra entries' inline type would be `BagAdditionalProperties`.
     BagAdditionalProperties:
       type: object
@@ -62,7 +79,3 @@ components:
     Colors:
       type: array
       items: { type: string, enum: [red, green] }
-    CreateThingKindPath:
-      type: object
-      properties:
-        w: { type: string }

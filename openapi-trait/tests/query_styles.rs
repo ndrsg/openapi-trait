@@ -29,11 +29,11 @@ impl qs::QsApi for Echo {
 
     async fn search_items(
         &self,
-        req: qs::SearchItemsRequest,
+        req: qs::search_items::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<qs::SearchItemsResponse, Self::Error> {
-        Ok(qs::SearchItemsResponse::Status200(qs::SearchResult {
+    ) -> Result<qs::search_items::Response, Self::Error> {
+        Ok(qs::search_items::Response::Status200(qs::SearchResult {
             tag: req.tag.unwrap_or_default(),
             csv: req.csv.unwrap_or_default(),
             space: req.space.unwrap_or_default(),
@@ -55,8 +55,8 @@ async fn spawn_echo_server() -> String {
     format!("http://{addr}")
 }
 
-fn sample_request() -> qc::SearchItemsRequest {
-    qc::SearchItemsRequest {
+fn sample_request() -> qc::search_items::Request {
+    qc::search_items::Request {
         tag: Some(vec!["a".into(), "b".into()]),
         csv: Some(vec!["x".into(), "y".into()]),
         space: Some(vec!["m".into(), "n".into()]),
@@ -144,7 +144,7 @@ async fn client_server_round_trip() {
 
     let response = client.search_items(sample_request(), None).await.unwrap();
     // The spec declares a single 200 response, so this is the only variant.
-    let qc::SearchItemsResponse::Status200(result) = response;
+    let qc::search_items::Response::Status200(result) = response;
 
     assert_eq!(result.tag, ["a", "b"]);
     assert_eq!(result.csv, ["x", "y"]);
@@ -186,7 +186,7 @@ async fn empty_optional_params_are_absent() {
     };
     client
         .search_items(
-            qc::SearchItemsRequest {
+            qc::search_items::Request {
                 tag: None,
                 csv: None,
                 space: None,

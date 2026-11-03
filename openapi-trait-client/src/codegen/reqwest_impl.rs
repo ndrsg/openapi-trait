@@ -3,8 +3,7 @@ use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::{
-    response_payload_ident, BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo,
-    ResponseHeaderInfo, ResponseStatus,
+    BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo, ResponseHeaderInfo, ResponseStatus,
 };
 use openapi_trait_shared::codegen::security::{
     auth_state_ident, client_auth_trait_ident, resolve_alternatives, scheme_field_ident, ApiKeyIn,
@@ -250,8 +249,8 @@ fn generate_impl_method(
     has_auth: bool,
 ) -> TokenStream {
     let method_ident = &op.method_ident;
-    let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
-    let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
+    let req_ident = op.request_path();
+    let resp_ident = op.response_path();
     let http_method = format_ident!("{}", op.method);
     let operation_name = &op.operation_id;
     let path = &op.path;
@@ -463,7 +462,7 @@ fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
 fn generate_response_match(
     op: &OperationInfo,
     error_name: &proc_macro2::Ident,
-    resp_ident: &proc_macro2::Ident,
+    resp_ident: &TokenStream,
     operation_name: &str,
 ) -> (Vec<TokenStream>, TokenStream) {
     let response_arms: Vec<TokenStream> = op
@@ -544,10 +543,10 @@ fn generate_payload_response_arm(
     response: &openapi_trait_shared::codegen::operations::ResponseInfo,
     code: u16,
     error_name: &proc_macro2::Ident,
-    resp_ident: &proc_macro2::Ident,
+    resp_ident: &TokenStream,
     variant_ident: &proc_macro2::Ident,
 ) -> TokenStream {
-    let payload_ident = response_payload_ident(&op.operation_id, code);
+    let payload_ident = op.payload_path(code);
 
     let header_reads: Vec<TokenStream> = response
         .headers

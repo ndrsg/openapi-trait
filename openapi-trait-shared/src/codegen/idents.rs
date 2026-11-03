@@ -98,26 +98,6 @@ pub fn field_ident(param_name: &str) -> Result<Ident, String> {
     safe_ident(&param_name.to_snake_case(), param_name, "parameter")
 }
 
-/// Validate that an `operationId` yields a usable `PascalCase` base for generated
-/// type names (`{Base}Request`, `{Base}Response`, `{Base}Auth`, …).
-///
-/// A non-empty suffix is always appended by callers, so a keyword base is fine
-/// (`type` → `TypeRequest`); only genuinely invalid characters or an empty base
-/// are rejected.
-///
-/// # Errors
-///
-/// Returns `Err(reason)` when the `PascalCase` base is not a legal identifier.
-pub fn validate_type_base(operation_id: &str) -> Result<(), String> {
-    let pascal = operation_id.to_pascal_case();
-    if !is_plain_ident(&pascal) {
-        return Err(format!(
-            "operationId `{operation_id}` produces the invalid Rust type-name base `{pascal}`; it must start with a letter or underscore and contain only letters, digits, and underscores"
-        ));
-    }
-    Ok(())
-}
-
 /// Validate an already-assembled type name (e.g. a synthesized query-param enum
 /// like `ListPetsStatusQuery`) and turn it into an [`Ident`].
 ///
@@ -330,8 +310,6 @@ mod tests {
     #[test]
     fn type_base_keyword_is_fine_but_digit_is_not() {
         // `type` -> `Type`, a valid base (a suffix is appended by callers).
-        assert!(validate_type_base("type").is_ok());
-        assert!(validate_type_base("1pet").is_err());
     }
 
     #[test]

@@ -23,12 +23,12 @@
 //!
 //!     async fn get_pet_by_id(
 //!         &self,
-//!         req: petstore::GetPetByIdRequest,
-//!         _auth: petstore::GetPetByIdAuth,
+//!         req: petstore::get_pet_by_id::Request,
+//!         _auth: petstore::get_pet_by_id::Auth,
 //!         _state: axum::extract::State<AppState>,
 //!         _headers: axum::http::HeaderMap,
-//!     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
-//!         Ok(petstore::GetPetByIdResponse::Status200(petstore::Pet {
+//!     ) -> Result<petstore::get_pet_by_id::Response, Self::Error> {
+//!         Ok(petstore::get_pet_by_id::Response::Status200(petstore::Pet {
 //!             id: Some(req.pet_id),
 //!             name: "doggie".into(),
 //!             photo_urls: vec![],

@@ -18,117 +18,119 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_me(
         &self,
-        _req: sec_axum::GetMeRequest,
+        _req: sec_axum::get_me::Request,
         auth: sec_axum::ApiKeyAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetMeResponse, Self::Error> {
-        Ok(sec_axum::GetMeResponse::Status200(sec_axum::OkPayload {
+    ) -> Result<sec_axum::get_me::Response, Self::Error> {
+        Ok(sec_axum::get_me::Response::Status200(sec_axum::OkPayload {
             ok: auth.0 == "k",
         }))
     }
 
     async fn get_admin(
         &self,
-        _req: sec_axum::GetAdminRequest,
+        _req: sec_axum::get_admin::Request,
         auth: sec_axum::BearerAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetAdminResponse, Self::Error> {
-        Ok(sec_axum::GetAdminResponse::Status200(
+    ) -> Result<sec_axum::get_admin::Response, Self::Error> {
+        Ok(sec_axum::get_admin::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
     }
 
     async fn get_flex(
         &self,
-        _req: sec_axum::GetFlexRequest,
-        auth: sec_axum::GetFlexAuth,
+        _req: sec_axum::get_flex::Request,
+        auth: sec_axum::get_flex::Auth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetFlexResponse, Self::Error> {
+    ) -> Result<sec_axum::get_flex::Response, Self::Error> {
         let kind = match auth {
-            sec_axum::GetFlexAuth::BearerAuth(b) => format!("bearer:{}", b.0),
-            sec_axum::GetFlexAuth::BasicAuth(b) => format!("basic:{}:{}", b.username, b.password),
+            sec_axum::get_flex::Auth::BearerAuth(b) => format!("bearer:{}", b.0),
+            sec_axum::get_flex::Auth::BasicAuth(b) => {
+                format!("basic:{}:{}", b.username, b.password)
+            }
         };
-        Ok(sec_axum::GetFlexResponse::Status200(
+        Ok(sec_axum::get_flex::Response::Status200(
             sec_axum::KindPayload { kind },
         ))
     }
 
     async fn get_public(
         &self,
-        _req: sec_axum::GetPublicRequest,
+        _req: sec_axum::get_public::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetPublicResponse, Self::Error> {
-        Ok(sec_axum::GetPublicResponse::Status200(
+    ) -> Result<sec_axum::get_public::Response, Self::Error> {
+        Ok(sec_axum::get_public::Response::Status200(
             sec_axum::OkPayload { ok: true },
         ))
     }
 
     async fn get_cookied(
         &self,
-        _req: sec_axum::GetCookiedRequest,
+        _req: sec_axum::get_cookied::Request,
         auth: sec_axum::SessionCookie,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetCookiedResponse, Self::Error> {
-        Ok(sec_axum::GetCookiedResponse::Status200(
+    ) -> Result<sec_axum::get_cookied::Response, Self::Error> {
+        Ok(sec_axum::get_cookied::Response::Status200(
             sec_axum::SessionPayload { session: auth.0 },
         ))
     }
 
     async fn get_oauth(
         &self,
-        _req: sec_axum::GetOauthRequest,
+        _req: sec_axum::get_oauth::Request,
         auth: sec_axum::Oauth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetOauthResponse, Self::Error> {
-        Ok(sec_axum::GetOauthResponse::Status200(
+    ) -> Result<sec_axum::get_oauth::Response, Self::Error> {
+        Ok(sec_axum::get_oauth::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
     }
 
     async fn get_oidc(
         &self,
-        _req: sec_axum::GetOidcRequest,
+        _req: sec_axum::get_oidc::Request,
         auth: sec_axum::Oidc,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetOidcResponse, Self::Error> {
-        Ok(sec_axum::GetOidcResponse::Status200(
+    ) -> Result<sec_axum::get_oidc::Response, Self::Error> {
+        Ok(sec_axum::get_oidc::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
     }
 
     async fn get_maybe(
         &self,
-        _req: sec_axum::GetMaybeRequest,
+        _req: sec_axum::get_maybe::Request,
         auth: Option<sec_axum::BearerAuth>,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetMaybeResponse, Self::Error> {
+    ) -> Result<sec_axum::get_maybe::Response, Self::Error> {
         let kind = auth.map_or_else(|| "anonymous".to_owned(), |b| format!("bearer:{}", b.0));
-        Ok(sec_axum::GetMaybeResponse::Status200(
+        Ok(sec_axum::get_maybe::Response::Status200(
             sec_axum::KindPayload { kind },
         ))
     }
 
     async fn get_maybe_flex(
         &self,
-        _req: sec_axum::GetMaybeFlexRequest,
-        auth: Option<sec_axum::GetMaybeFlexAuth>,
+        _req: sec_axum::get_maybe_flex::Request,
+        auth: Option<sec_axum::get_maybe_flex::Auth>,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<sec_axum::GetMaybeFlexResponse, Self::Error> {
+    ) -> Result<sec_axum::get_maybe_flex::Response, Self::Error> {
         let kind = match auth {
             None => "anonymous".to_owned(),
-            Some(sec_axum::GetMaybeFlexAuth::BearerAuth(b)) => format!("bearer:{}", b.0),
-            Some(sec_axum::GetMaybeFlexAuth::BasicAuth(b)) => format!("basic:{}", b.username),
+            Some(sec_axum::get_maybe_flex::Auth::BearerAuth(b)) => format!("bearer:{}", b.0),
+            Some(sec_axum::get_maybe_flex::Auth::BasicAuth(b)) => format!("basic:{}", b.username),
         };
-        Ok(sec_axum::GetMaybeFlexResponse::Status200(
+        Ok(sec_axum::get_maybe_flex::Response::Status200(
             sec_axum::KindPayload { kind },
         ))
     }
@@ -315,11 +317,11 @@ async fn client_injects_bearer_token() {
     };
 
     let resp = client
-        .get_admin(sec_client::GetAdminRequest {}, None)
+        .get_admin(sec_client::get_admin::Request {}, None)
         .await
         .unwrap();
     match resp {
-        sec_client::GetAdminResponse::Status200(body) => assert_eq!(body.token, "xyz"),
+        sec_client::get_admin::Response::Status200(body) => assert_eq!(body.token, "xyz"),
     }
 }
 
@@ -342,13 +344,13 @@ async fn per_request_bearer_overrides_scheme_credential() {
     // would see "scheme-token" (the first header) instead.
     let resp = client
         .get_admin(
-            sec_client::GetAdminRequest {},
+            sec_client::get_admin::Request {},
             Some(openapi_trait::RequestOptions::new().bearer_auth("override-token")),
         )
         .await
         .unwrap();
     match resp {
-        sec_client::GetAdminResponse::Status200(body) => {
+        sec_client::get_admin::Response::Status200(body) => {
             assert_eq!(body.token, "override-token");
         }
     }
@@ -363,7 +365,7 @@ async fn client_missing_credential_errors_before_send() {
     };
 
     let err = client
-        .get_admin(sec_client::GetAdminRequest {}, None)
+        .get_admin(sec_client::get_admin::Request {}, None)
         .await
         .unwrap_err();
     let msg = format!("{err}");
@@ -385,13 +387,13 @@ async fn per_request_bearer_works_without_client_credential() {
 
     let resp = client
         .get_admin(
-            sec_client::GetAdminRequest {},
+            sec_client::get_admin::Request {},
             Some(openapi_trait::RequestOptions::new().bearer_auth("per-request-token")),
         )
         .await
         .unwrap();
     match resp {
-        sec_client::GetAdminResponse::Status200(body) => {
+        sec_client::get_admin::Response::Status200(body) => {
             assert_eq!(body.token, "per-request-token");
         }
     }
@@ -413,18 +415,18 @@ async fn client_sends_oauth2_and_oidc_tokens_as_bearer() {
     };
 
     match client
-        .get_oauth(sec_client::GetOauthRequest {}, None)
+        .get_oauth(sec_client::get_oauth::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetOauthResponse::Status200(body) => assert_eq!(body.token, "oauth-token"),
+        sec_client::get_oauth::Response::Status200(body) => assert_eq!(body.token, "oauth-token"),
     }
     match client
-        .get_oidc(sec_client::GetOidcRequest {}, None)
+        .get_oidc(sec_client::get_oidc::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetOidcResponse::Status200(body) => assert_eq!(body.token, "oidc-token"),
+        sec_client::get_oidc::Response::Status200(body) => assert_eq!(body.token, "oidc-token"),
     }
 }
 
@@ -438,18 +440,18 @@ async fn client_calls_optional_auth_operations_with_and_without_credentials() {
         creds: sec_client::SecClientAuthState::default(),
     };
     match anonymous
-        .get_maybe(sec_client::GetMaybeRequest {}, None)
+        .get_maybe(sec_client::get_maybe::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetMaybeResponse::Status200(body) => assert_eq!(body.kind, "anonymous"),
+        sec_client::get_maybe::Response::Status200(body) => assert_eq!(body.kind, "anonymous"),
     }
     match anonymous
-        .get_maybe_flex(sec_client::GetMaybeFlexRequest {}, None)
+        .get_maybe_flex(sec_client::get_maybe_flex::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetMaybeFlexResponse::Status200(body) => assert_eq!(body.kind, "anonymous"),
+        sec_client::get_maybe_flex::Response::Status200(body) => assert_eq!(body.kind, "anonymous"),
     }
 
     let authed = {
@@ -457,17 +459,19 @@ async fn client_calls_optional_auth_operations_with_and_without_credentials() {
         anonymous.with_bearer_auth("tok")
     };
     match authed
-        .get_maybe(sec_client::GetMaybeRequest {}, None)
+        .get_maybe(sec_client::get_maybe::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetMaybeResponse::Status200(body) => assert_eq!(body.kind, "bearer:tok"),
+        sec_client::get_maybe::Response::Status200(body) => assert_eq!(body.kind, "bearer:tok"),
     }
     match authed
-        .get_maybe_flex(sec_client::GetMaybeFlexRequest {}, None)
+        .get_maybe_flex(sec_client::get_maybe_flex::Request {}, None)
         .await
         .unwrap()
     {
-        sec_client::GetMaybeFlexResponse::Status200(body) => assert_eq!(body.kind, "bearer:tok"),
+        sec_client::get_maybe_flex::Response::Status200(body) => {
+            assert_eq!(body.kind, "bearer:tok");
+        }
     }
 }
