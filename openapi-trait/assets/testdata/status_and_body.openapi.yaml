@@ -1,0 +1,18 @@
+# Regression fixture for KNOWN_ISSUES.md S2 (uncommon status codes).
+openapi: 3.0.1
+info:
+  title: status and body
+  version: 0.0.1
+paths:
+  /partial:
+    get:
+      operationId: getPartial
+      parameters:
+        - { name: which, in: query, required: true, schema: { type: integer } }
+      responses:
+        '206':
+          description: partial
+          content:
+            application/json: { schema: { type: string } }
+        '308': { description: permanent redirect }
+        '418': { description: teapot }
