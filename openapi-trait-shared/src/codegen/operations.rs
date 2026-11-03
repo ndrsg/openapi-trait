@@ -105,8 +105,27 @@ pub struct ParamInfo {
 /// How a request/response body is encoded on the wire.
 #[derive(Debug, Clone)]
 pub enum BodyEncoding {
-    Json,
-    Bytes { content_type: String },
+    /// JSON, serialized with `serde_json`. `content_type` is the declared media
+    /// type (`application/json`, `application/merge-patch+json`, …), which is
+    /// sent as the `Content-Type` header.
+    Json {
+        content_type: String,
+    },
+    Bytes {
+        content_type: String,
+    },
+}
+
+impl BodyEncoding {
+    /// The declared `Content-Type` when it differs from plain
+    /// `application/json`, which serde/axum/reqwest already send by default.
+    #[must_use]
+    pub fn custom_json_content_type(&self) -> Option<&str> {
+        match self {
+            Self::Json { content_type } if content_type != "application/json" => Some(content_type),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -174,7 +193,7 @@ fn op_has_binary_response_body(op: &OperationInfo) -> bool {
 fn request_body_field_type(body: &BodyInfo, binary: &BinaryBodyTypes) -> TokenStream {
     let inner = match &body.encoding {
         BodyEncoding::Bytes { .. } => binary.request.clone(),
-        BodyEncoding::Json => body.rust_type.clone(),
+        BodyEncoding::Json { .. } => body.rust_type.clone(),
     };
     if body.required {
         inner
@@ -347,7 +366,7 @@ fn build_operation_info(
     let body = operation
         .request_body
         .as_ref()
-        .and_then(|rb| build_body_info(rb, openapi));
+        .and_then(|rb| build_body_info(rb, openapi, &operation_id, diag));
 
     let responses = build_responses(&operation.responses, openapi, &operation_id, diag);
     let auth = resolve_op_security(operation, openapi, schemes);
@@ -602,7 +621,15 @@ fn param_schema(param: &Parameter, openapi: &OpenAPI) -> Option<Schema> {
 }
 
 /// Build body info from a request body reference.
-fn build_body_info(ref_or_rb: &ReferenceOr<RequestBody>, openapi: &OpenAPI) -> Option<BodyInfo> {
+///
+/// Warns when the body has content but none of its media types is supported,
+/// because the operation is then generated without a `body` field.
+fn build_body_info(
+    ref_or_rb: &ReferenceOr<RequestBody>,
+    openapi: &OpenAPI,
+    op_id: &str,
+    diag: &mut Diagnostics,
+) -> Option<BodyInfo> {
     let rb = match ref_or_rb {
         ReferenceOr::Item(r) => r,
         ReferenceOr::Reference { reference } => {
@@ -616,7 +643,16 @@ fn build_body_info(ref_or_rb: &ReferenceOr<RequestBody>, openapi: &OpenAPI) -> O
         }
     };
 
-    let resolved = media_type_to_rust(&rb.content, openapi)?;
+    let Some(resolved) = media_type_to_rust(&rb.content, openapi) else {
+        if !rb.content.is_empty() {
+            let types: Vec<&str> = rb.content.keys().map(String::as_str).collect();
+            diag.warn(format!(
+                "operation `{op_id}`: request body media type(s) {} are not supported (only JSON and binary bodies are); the body was skipped",
+                types.join(", ")
+            ));
+        }
+        return None;
+    };
 
     Some(BodyInfo {
         description: rb.description.clone(),
@@ -658,53 +694,59 @@ const fn schema_is_binary(ref_or: &ReferenceOr<Schema>) -> bool {
     }
 }
 
+/// The media type without parameters, trimmed and lowercased:
+/// `"Application/JSON; charset=utf-8"` → `"application/json"`.
+fn media_type_essence(content_type: &str) -> String {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
+/// True when the content type is JSON: `application/json` or any `+json`
+/// structured-syntax suffix (`application/problem+json`, …), with or without
+/// parameters such as `charset`.
+fn is_json_media_type(content_type: &str) -> bool {
+    let essence = media_type_essence(content_type);
+    essence == "application/json" || essence.ends_with("+json")
+}
+
 /// Resolve the Rust type and wire encoding from a content map.
+///
+/// JSON media types win over binary ones, and plain `application/json` wins
+/// over other JSON media types. Entries without a schema are skipped.
 fn media_type_to_rust(
     content: &indexmap::IndexMap<String, MediaType>,
     _openapi: &OpenAPI,
 ) -> Option<MediaTypeResolved> {
-    if let Some(media) = content.get("application/json") {
-        if let Some(ref_or_schema) = media.schema.as_ref() {
-            return Some(MediaTypeResolved {
-                rust_type: schema_to_rust_type(ref_or_schema, true),
-                encoding: BodyEncoding::Json,
-            });
-        }
-    }
+    let with_schema = || {
+        content
+            .iter()
+            .filter_map(|(ct, media)| media.schema.as_ref().map(|s| (ct, s)))
+    };
 
-    for (content_type, media) in content {
-        let Some(ref_or_schema) = media.schema.as_ref() else {
-            continue;
-        };
-        if is_binary_media_type(content_type) || schema_is_binary(ref_or_schema) {
-            return Some(MediaTypeResolved {
-                rust_type: quote! { ::std::vec::Vec<u8> },
-                encoding: BodyEncoding::Bytes {
-                    content_type: content_type.clone(),
-                },
-            });
-        }
-    }
-
-    // Fall back to the first entry: JSON-shaped only; binary already handled above.
-    let (content_type, media) = content.iter().next()?;
-    let ref_or_schema = media.schema.as_ref()?;
-    if is_binary_media_type(content_type) || schema_is_binary(ref_or_schema) {
+    let json = with_schema()
+        .find(|(ct, _)| media_type_essence(ct) == "application/json")
+        .or_else(|| with_schema().find(|(ct, _)| is_json_media_type(ct)));
+    if let Some((content_type, ref_or_schema)) = json {
         return Some(MediaTypeResolved {
-            rust_type: quote! { ::std::vec::Vec<u8> },
-            encoding: BodyEncoding::Bytes {
+            rust_type: schema_to_rust_type(ref_or_schema, true),
+            encoding: BodyEncoding::Json {
                 content_type: content_type.clone(),
             },
         });
     }
-    if *content_type == "application/json" {
-        return Some(MediaTypeResolved {
-            rust_type: schema_to_rust_type(ref_or_schema, true),
-            encoding: BodyEncoding::Json,
-        });
-    }
 
-    None
+    with_schema()
+        .find(|(ct, schema)| is_binary_media_type(ct) || schema_is_binary(schema))
+        .map(|(content_type, _)| MediaTypeResolved {
+            rust_type: quote! { ::std::vec::Vec<u8> },
+            encoding: BodyEncoding::Bytes {
+                content_type: content_type.clone(),
+            },
+        })
 }
 
 /// Resolve media type for a response, emitting a warning for unsupported types.
@@ -1623,6 +1665,74 @@ paths:
         assert!(
             enum_src.contains("TestResponseBody"),
             "binary response body should use configured stream type: {enum_src}"
+        );
+    }
+
+    /// Spec with one `POST /x` operation whose request body has the given
+    /// `content` map (YAML flow mapping).
+    fn body_spec(content: &str) -> String {
+        format!(
+            r#"
+openapi: 3.0.0
+info: {{ title: t, version: "1.0" }}
+paths:
+  /x:
+    post:
+      operationId: postX
+      requestBody:
+        required: true
+        content: {content}
+      responses:
+        '204': {{ description: ok }}
+"#
+        )
+    }
+
+    #[test]
+    fn json_suffix_and_charset_bodies_are_typed_as_json() {
+        for ct in [
+            "application/merge-patch+json",
+            "application/vnd.api+json",
+            "application/json; charset=utf-8",
+            "Application/JSON",
+        ] {
+            let (ops, diag) = collect(&body_spec(&format!(
+                "{{ '{ct}': {{ schema: {{ type: integer }} }} }}"
+            )));
+            assert!(diag.warnings.is_empty(), "{ct}: {:?}", diag.warnings);
+            let body = ops[0]
+                .body
+                .as_ref()
+                .unwrap_or_else(|| panic!("{ct}: no body"));
+            assert_eq!(body.rust_type.to_string(), "i64", "{ct}");
+            match &body.encoding {
+                BodyEncoding::Json { content_type } => assert_eq!(content_type, ct),
+                other @ BodyEncoding::Bytes { .. } => panic!("{ct}: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn plain_json_is_preferred_over_other_json_media_types() {
+        let (ops, _) = collect(&body_spec(
+            "{ 'application/merge-patch+json': { schema: { type: integer } }, \
+               'application/json': { schema: { type: string } } }",
+        ));
+        let body = ops[0].body.as_ref().unwrap();
+        assert!(body.encoding.custom_json_content_type().is_none());
+        assert_eq!(body.rust_type.to_string(), ":: std :: string :: String");
+    }
+
+    #[test]
+    fn unsupported_body_media_type_warns() {
+        let (ops, diag) = collect(&body_spec("{ 'text/csv': { schema: { type: string } } }"));
+        assert_eq!(ops.len(), 1);
+        assert!(ops[0].body.is_none());
+        assert_eq!(diag.warnings.len(), 1, "{:?}", diag.warnings);
+        assert!(
+            diag.warnings[0].contains("postX") && diag.warnings[0].contains("text/csv"),
+            "{:?}",
+            diag.warnings
         );
     }
 

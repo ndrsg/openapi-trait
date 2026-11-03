@@ -830,14 +830,24 @@ fn generate_body_builder(op: &OperationInfo) -> TokenStream {
                     }
                 }
             }
-            BodyEncoding::Json => {
+            encoding @ BodyEncoding::Json { .. } => {
+                // `.json()` only sets `Content-Type: application/json` when no
+                // `Content-Type` is set yet, so a declared JSON media type such
+                // as `application/merge-patch+json` is set first.
+                let content_type = encoding.custom_json_content_type().map(|ct| {
+                    quote! {
+                        request = request.header(::openapi_trait::reqwest::header::CONTENT_TYPE, #ct);
+                    }
+                });
                 if body.required {
                     quote! {
+                        #content_type
                         request = request.json(&body);
                     }
                 } else {
                     quote! {
                         if let ::core::option::Option::Some(body) = body {
+                            #content_type
                             request = request.json(&body);
                         }
                     }

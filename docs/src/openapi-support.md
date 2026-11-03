@@ -27,6 +27,8 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | Query parameters, including enums and array `style`/`explode` | ✅ |
 | Header parameters | ✅ |
 | JSON request bodies | ✅ an optional body (`required: false`) is `None` when no JSON `Content-Type` is sent |
+| JSON media types (`application/*+json`, `charset` parameters) | ✅ typed like `application/json`; the declared media type is sent as the `Content-Type` |
+| Other request body media types (`text/plain`, forms, multipart) | not supported: the body is skipped with a warning |
 | Binary request bodies | ✅ streamed: `axum::body::Body` on the server, `reqwest::Body` on the client |
 | One response enum per operation | ✅ |
 | `default` responses | ✅ `Default(...)` variant |

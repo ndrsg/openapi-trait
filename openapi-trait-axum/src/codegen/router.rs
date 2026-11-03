@@ -193,10 +193,12 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                                 },
                             }
                         }
-                        _ => {
+                        encoding => {
+                            let content_type = json_content_type_header(encoding);
                             quote! {
                                 Self::#variant_ident(body) => (
                                     #status_code,
+                                    #content_type
                                     ::axum::Json(body),
                                 ).into_response(),
                             }
@@ -234,6 +236,14 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
     }
 }
 
+/// The `[(CONTENT_TYPE, …)],` tuple element that overrides the
+/// `application/json` set by `axum::Json` with the declared JSON media type
+/// (`application/problem+json`, …). Empty for plain `application/json`.
+fn json_content_type_header(encoding: Option<&BodyEncoding>) -> Option<TokenStream> {
+    let ct = encoding?.custom_json_content_type()?;
+    Some(quote! { [(::axum::http::header::CONTENT_TYPE, #ct)], })
+}
+
 /// Generate a match arm for a response variant that carries a headers payload struct.
 fn generate_payload_into_response_arm(
     _op: &OperationInfo,
@@ -254,10 +264,12 @@ fn generate_payload_into_response_arm(
                     .into_response();
             }
         }
-        (Some(_), _) => {
+        (Some(_), encoding) => {
+            let content_type = json_content_type_header(encoding.as_ref());
             quote! {
                 let mut response = (
                     #status_code,
+                    #content_type
                     ::axum::Json(payload.body),
                 )
                     .into_response();
@@ -798,7 +810,9 @@ fn build_body_extractor(op: &OperationInfo) -> (Option<TokenStream>, Option<Toke
                     };
                     (Some(extractor), Some(field_init))
                 }
-                BodyEncoding::Json => {
+                // axum's `Json` extractor accepts `application/json` and any
+                // `application/*+json` media type, with or without parameters.
+                BodyEncoding::Json { .. } => {
                     if body.required {
                         let extractor = quote! {
                             ::axum::extract::Json(body):

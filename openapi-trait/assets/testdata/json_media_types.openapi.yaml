@@ -1,0 +1,39 @@
+# Regression fixture for KNOWN_ISSUES.md C8: JSON media types other than
+# plain `application/json` were dropped without a warning.
+openapi: 3.0.1
+info:
+  title: json media types
+  version: 0.0.1
+paths:
+  /things/{id}:
+    patch:
+      operationId: patchThing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema: { $ref: '#/components/schemas/ThingPatch' }
+      responses:
+        '200':
+          description: echo of the received content type
+          content:
+            application/json; charset=utf-8:
+              schema: { type: string }
+        '404':
+          description: not found
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+components:
+  schemas:
+    ThingPatch:
+      type: object
+      properties:
+        name: { type: string }
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
