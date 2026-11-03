@@ -8,6 +8,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 |---|---|
 | `components/schemas` → structs | ✅ |
 | Required vs. optional properties | ✅ optional properties become `Option<T>` |
+| `nullable: true` | ✅ `Option<T>`, also for array items and map values; ignored for parameters and headers |
 | String enums | ✅ Rust enums, with `#[serde(rename)]` per variant |
 | `additionalProperties` | ✅ `HashMap<String, T>` |
 | String `format` | ✅ `date-time` → `chrono::DateTime<Utc>`, `date` → `chrono::NaiveDate`, `uuid` → `uuid::Uuid`, `binary` → `Vec<u8>`; other formats, including `email`, stay `String` (`chrono` and `uuid` are re-exported) |

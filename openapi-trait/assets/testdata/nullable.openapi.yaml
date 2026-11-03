@@ -1,0 +1,51 @@
+# Regression fixture for KNOWN_ISSUES.md C6 (`nullable: true`).
+openapi: 3.0.1
+info:
+  title: nullable
+  version: 0.0.1
+paths:
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - { name: tag, in: query, required: true, schema: { type: string, nullable: true } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Thing' }
+components:
+  schemas:
+    Color:
+      type: string
+      enum: [red, green]
+    Owner:
+      type: object
+      required: [id]
+      properties:
+        id: { type: integer }
+    Thing:
+      type: object
+      required: [name, tags, color, owner, scores, labels]
+      properties:
+        name: { type: string, nullable: true }
+        tags:
+          type: array
+          nullable: true
+          items: { type: string }
+        scores:
+          type: array
+          items: { type: integer, nullable: true }
+        labels:
+          type: object
+          additionalProperties: { type: string, nullable: true }
+        color:
+          type: string
+          nullable: true
+          enum: [red, green, null]
+        owner:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Owner'
+        nickname: { type: string, nullable: true }

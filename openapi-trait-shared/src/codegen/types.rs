@@ -7,7 +7,8 @@ use quote::quote;
 
 /// Map an `OpenAPI` `Schema` (or `$ref`) to a Rust type `TokenStream`.
 ///
-/// `required` controls whether the result is wrapped in `Option<T>`.
+/// The result is wrapped in `Option<T>` when `required` is false or the schema
+/// is `nullable: true`.
 ///
 /// This is the context-free entry point: any inline `oneOf` / `allOf` / `anyOf`
 /// encountered along the way falls back to `serde_json::Value`. Use
@@ -22,6 +23,22 @@ pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> Toke
     let models = std::collections::BTreeSet::new();
     schema_to_rust_type_ctx(ref_or, required, None, &mut sink, &models)
     // sink is discarded — by definition no parent name means no synthesis.
+}
+
+/// Like [`schema_to_rust_type`], but ignores `nullable: true`.
+///
+/// Used for parameters and headers: they can't carry a JSON `null` on the
+/// wire, so `nullable` must not change their type.
+#[must_use]
+pub fn non_null_schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
+    if let ReferenceOr::Item(schema) = ref_or {
+        if schema.schema_data.nullable {
+            let mut schema = schema.clone();
+            schema.schema_data.nullable = false;
+            return schema_to_rust_type(&ReferenceOr::Item(schema), required);
+        }
+    }
+    schema_to_rust_type(ref_or, required)
 }
 
 /// Context-aware variant of [`schema_to_rust_type`].
@@ -39,10 +56,36 @@ pub fn schema_to_rust_type_ctx(
     models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
     let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, inline_types, models);
-    if required {
+    if required && !is_nullable(ref_or) {
         inner
     } else {
         quote! { ::core::option::Option<#inner> }
+    }
+}
+
+/// Whether an inline schema is marked `nullable: true`.
+///
+/// A bare `$ref` can't carry `nullable` in OAS 3.0; the usual workaround,
+/// `allOf: [$ref]` plus `nullable: true`, is an inline schema and is covered.
+#[must_use]
+pub const fn is_nullable(ref_or: &ReferenceOr<Schema>) -> bool {
+    matches!(ref_or, ReferenceOr::Item(schema) if schema.schema_data.nullable)
+}
+
+/// Like [`ref_or_to_inner_type_ctx`], but wraps the type in `Option<T>` when
+/// the schema is nullable. Used for array items and map values, where `null`
+/// entries are allowed only if the item schema is nullable.
+fn nullable_inner_type_ctx(
+    ref_or: &ReferenceOr<Schema>,
+    parent_name: Option<&str>,
+    inline_types: &mut Vec<TokenStream>,
+    models: &std::collections::BTreeSet<String>,
+) -> TokenStream {
+    let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, inline_types, models);
+    if is_nullable(ref_or) {
+        quote! { ::core::option::Option<#inner> }
+    } else {
+        inner
     }
 }
 
@@ -190,7 +233,7 @@ fn primitive_type_to_rust(
             let item_ty = a.items.as_ref().map_or_else(
                 || quote! { ::serde_json::Value },
                 |items| {
-                    ref_or_to_inner_type_ctx(
+                    nullable_inner_type_ctx(
                         &items.clone().unbox(),
                         parent_name,
                         inline_types,
@@ -287,7 +330,7 @@ pub fn additional_properties_value_type(
     match ap {
         AdditionalProperties::Any(false) => None,
         AdditionalProperties::Any(true) => Some(quote! { ::serde_json::Value }),
-        AdditionalProperties::Schema(schema) => Some(ref_or_to_inner_type_ctx(
+        AdditionalProperties::Schema(schema) => Some(nullable_inner_type_ctx(
             schema,
             parent_name,
             inline_types,
