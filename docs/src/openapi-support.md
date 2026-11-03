@@ -22,7 +22,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 
 | Feature | Status |
 |---|---|
-| Path parameters | ✅ |
+| Path parameters, including enums | ✅ |
 | Query parameters, including enums and array `style`/`explode` | ✅ |
 | Header parameters | ✅ |
 | JSON request bodies | ✅ an optional body (`required: false`) is `None` when no JSON `Content-Type` is sent |

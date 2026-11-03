@@ -26,7 +26,8 @@ items:
   appear:
   - a nested object or composition in a property becomes
     `{ParentStruct}{Property}`;
-  - an inline query enum becomes `{OperationId}{Param}Query`.
+  - an inline query enum becomes `{OperationId}{Param}Query`, and an inline
+    path enum becomes `{OperationId}{Param}Path`.
 
 The best way to see what a spec produces is to
 [dump the generated code](debugging.md), or to add
