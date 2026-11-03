@@ -1,21 +1,20 @@
 use heck::ToPascalCase;
-use openapiv3::{
-    Header, MediaType, OpenAPI, Operation, Parameter, ParameterSchemaOrContent, PathItem,
-    QueryStyle, ReferenceOr, RequestBody, Response, Responses, Schema, SchemaKind, StatusCode,
-    StringFormat, Type, VariantOrUnknownOrEmpty,
+use oas3::spec::{
+    Header, MediaType, ObjectOrReference, Operation, Parameter, ParameterIn, ParameterStyle,
+    PathItem, RequestBody, Response, Schema, Spec,
 };
+use oas3::Map;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ctx::CodegenCtx;
 use super::idents;
+use super::model::{self, Kind, StatusKey};
 use super::schemas::doc_attr;
 use super::security::{
     generate_op_auth_enum, resolve_alternatives, resolve_op_security, OpSecurity, SchemeInfo,
 };
-use super::types::{
-    is_string_enum, non_null_schema_to_rust_type_ctx, schema_to_rust_type_ctx, string_enum_values,
-};
+use super::types::{non_null_schema_to_rust_type_ctx, schema_to_rust_type_ctx};
 
 /// All information about a single API operation needed by later codegen stages.
 #[derive(Debug)]
@@ -327,22 +326,19 @@ impl Diagnostics {
 /// `operationId`s).
 #[must_use]
 pub fn collect_operations(
-    openapi: &OpenAPI,
+    openapi: &Spec,
     schemes: &[SchemeInfo],
     ctx: &mut CodegenCtx,
 ) -> (Vec<OperationInfo>, Diagnostics) {
     let mut ops = Vec::new();
     let mut diag = Diagnostics::default();
-    for (path, ref_or_item) in &openapi.paths.paths {
-        let item = match ref_or_item {
-            ReferenceOr::Item(i) => i,
-            ReferenceOr::Reference { .. } => {
-                diag.warn(format!(
-                    "path `{path}` is a $ref to a path item, which is not supported; all its operations were skipped"
-                ));
-                continue;
-            }
-        };
+    for (path, item) in openapi.paths.iter().flatten() {
+        if item.reference.is_some() {
+            diag.warn(format!(
+                "path `{path}` is a $ref to a path item, which is not supported; all its operations were skipped"
+            ));
+            continue;
+        }
         for (method, operation) in path_item_operations(item) {
             if let Some(info) = build_operation_info(
                 (path, item),
@@ -394,7 +390,7 @@ fn path_item_operations(item: &PathItem) -> Vec<(String, &Operation)> {
 fn build_operation_info(
     (path, path_item): (&str, &PathItem),
     (method, operation): (&str, &Operation),
-    openapi: &OpenAPI,
+    openapi: &Spec,
     schemes: &[SchemeInfo],
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
@@ -421,7 +417,7 @@ fn build_operation_info(
     // Collect parameters: path-level then operation-level; `collect_params`
     // lets an operation-level param override a path-level one with the same
     // `(name, in)`.
-    let mut all_params: Vec<&ReferenceOr<Parameter>> = Vec::new();
+    let mut all_params: Vec<&ObjectOrReference<Parameter>> = Vec::new();
     all_params.extend(path_item.parameters.iter());
     all_params.extend(operation.parameters.iter());
 
@@ -434,11 +430,11 @@ fn build_operation_info(
         .chain(
             operation
                 .responses
-                .responses
-                .keys()
-                .filter_map(|status| match status {
-                    StatusCode::Code(n) => Some(response_payload_ident(*n).to_string()),
-                    StatusCode::Range(_) => None,
+                .iter()
+                .flat_map(Map::keys)
+                .filter_map(|status| match model::parse_status_key(status) {
+                    StatusKey::Code(n) => Some(response_payload_ident(n).to_string()),
+                    StatusKey::Range(_) | StatusKey::Default | StatusKey::Invalid => None,
                 }),
         );
     let (collected, inline_types) = ctx.with_operation(&module_ident, reserved, |ctx| {
@@ -447,7 +443,12 @@ fn build_operation_info(
             .request_body
             .as_ref()
             .and_then(|rb| build_body_info(rb, openapi, &operation_id, ctx, diag));
-        let responses = build_responses(&operation.responses, openapi, &operation_id, ctx, diag);
+        let responses = operation
+            .responses
+            .as_ref()
+            .map_or_else(Vec::new, |responses| {
+                build_responses(responses, openapi, &operation_id, ctx, diag)
+            });
         Some((params, body, responses))
     });
     let ((path_params, query_params, header_params), body, responses) = collected?;
@@ -478,11 +479,11 @@ fn build_operation_info(
 /// cannot become a valid Rust identifier; cookie params and unresolved `$ref`s
 /// are non-fatal and merely warn.
 fn collect_params(
-    all_params: &[&ReferenceOr<Parameter>],
+    all_params: &[&ObjectOrReference<Parameter>],
     operation_id: &str,
     method: &str,
     path: &str,
-    openapi: &OpenAPI,
+    openapi: &Spec,
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Option<(Vec<ParamInfo>, Vec<ParamInfo>, Vec<ParamInfo>)> {
@@ -492,12 +493,12 @@ fn collect_params(
 
     let resolved = resolve_and_merge_params(all_params, operation_id, openapi, diag);
     for param in resolved {
-        let data = param.parameter_data_ref();
         let param_schema = param_schema(param, openapi);
+        let param_item = param_schema.and_then(model::item);
 
         // Keyword-safe field identifier for this parameter (shared by the request
         // struct and every transport that constructs it).
-        let field_ident = match idents::field_ident(&data.name) {
+        let field_ident = match idents::field_ident(&param.name) {
             Ok(id) => id,
             Err(msg) => {
                 diag.error(format!("operation `{method} {path}`: {msg}"));
@@ -507,17 +508,16 @@ fn collect_params(
 
         // A string-enum param gets a dedicated enum type; cookie params are
         // skipped.
-        let enum_suffix = match param {
-            Parameter::Path { .. } => Some("Path"),
-            Parameter::Query { .. } => Some("Query"),
-            Parameter::Header { .. } => Some("Header"),
-            Parameter::Cookie { .. } => None,
+        let enum_suffix = match param.location {
+            ParameterIn::Path => Some("Path"),
+            ParameterIn::Query => Some("Query"),
+            ParameterIn::Header => Some("Header"),
+            ParameterIn::Cookie => None,
         };
-        let (is_enum, enum_ident, enum_values) = if let (Some(suffix), Some(schema)) = (
-            enum_suffix,
-            param_schema.as_ref().filter(|s| is_string_enum(s)),
-        ) {
-            let name = ctx.reserve_type_name(&format!("{}{suffix}", data.name.to_pascal_case()));
+        let (is_enum, enum_ident, enum_values) = if let (Some(suffix), Some(vals)) =
+            (enum_suffix, param_item.and_then(model::string_enum_values))
+        {
+            let name = ctx.reserve_type_name(&format!("{}{suffix}", param.name.to_pascal_case()));
             let ident = match idents::type_ident(&name, operation_id) {
                 Ok(id) => id,
                 Err(msg) => {
@@ -525,21 +525,19 @@ fn collect_params(
                     return None;
                 }
             };
-            let vals = string_enum_values(schema);
             (true, Some(ident), vals)
         } else {
             (false, None, vec![])
         };
 
-        let array_item_type = param_array_item_type(param, param_schema.as_ref(), ctx);
+        let array_item_type = param_array_item_type(param, param_item, ctx);
 
         let rust_type = if is_enum {
             ctx.local_type(enum_ident.as_ref().unwrap())
         } else if let Some(item) = &array_item_type {
             quote! { ::std::vec::Vec<#item> }
         } else if let Some(schema) = &param_schema {
-            let ref_or = ReferenceOr::Item(schema.clone());
-            non_null_schema_to_rust_type_ctx(&ref_or, true, None, ctx)
+            non_null_schema_to_rust_type_ctx(schema, true, None, ctx)
         } else {
             quote! { ::std::string::String }
         };
@@ -548,24 +546,22 @@ fn collect_params(
 
         // deepObject and object-valued query params are not yet serialized
         // per-spec; warn and fall back to default form serialization.
-        if matches!(param, Parameter::Query { .. }) {
-            let is_object = matches!(
-                param_schema.as_ref().map(|s| &s.schema_kind),
-                Some(SchemaKind::Type(Type::Object(_)))
-            );
+        if param.location == ParameterIn::Query {
+            let is_object = param_item.is_some_and(|s| model::kind(s) == Kind::Object);
             if matches!(query.style, QueryStyleKind::DeepObject) || is_object {
                 diag.warn(format!(
                     "operation `{operation_id}`: query parameter `{}` uses deepObject/object serialization, which is not yet supported; falling back to default form serialization",
-                    data.name
+                    param.name
                 ));
             }
         }
 
         let info = ParamInfo {
-            name: data.name.clone(),
+            name: param.name.clone(),
             field_ident,
-            description: data.description.clone(),
-            required: data.required,
+            description: param.description.clone(),
+            // A path parameter is always required, whatever it declares.
+            required: param.location == ParameterIn::Path || param.required.unwrap_or(false),
             rust_type,
             is_enum,
             enum_ident,
@@ -573,13 +569,13 @@ fn collect_params(
             query,
         };
 
-        match param {
-            Parameter::Path { .. } => path_params.push(info),
-            Parameter::Query { .. } => query_params.push(info),
-            Parameter::Header { .. } => header_params.push(info),
-            Parameter::Cookie { .. } => diag.warn(format!(
+        match param.location {
+            ParameterIn::Path => path_params.push(info),
+            ParameterIn::Query => query_params.push(info),
+            ParameterIn::Header => header_params.push(info),
+            ParameterIn::Cookie => diag.warn(format!(
                 "operation `{operation_id}`: cookie parameter `{}` is not supported and was skipped",
-                data.name
+                param.name
             )),
         }
     }
@@ -592,29 +588,23 @@ fn collect_params(
 /// named `{Param}Query` or `{Param}Header` like a scalar enum.
 fn param_array_item_type(
     param: &Parameter,
-    param_schema: Option<&Schema>,
+    param_schema: Option<&oas3::spec::ObjectSchema>,
     ctx: &mut CodegenCtx,
 ) -> Option<TokenStream> {
-    let Some(SchemaKind::Type(Type::Array(arr))) = param_schema.map(|s| &s.schema_kind) else {
-        return None;
-    };
-    let Some(items) = &arr.items else {
+    let arr = param_schema.filter(|s| model::kind(s) == Kind::Array)?;
+    let Some(items) = arr.items.as_deref() else {
         return Some(quote! { ::openapi_trait::serde_json::Value });
     };
-    let items = items.clone().unbox();
-    let suffix = match param {
-        Parameter::Query { .. } => "Query",
-        Parameter::Header { .. } => "Header",
-        Parameter::Path { .. } | Parameter::Cookie { .. } => {
-            return Some(non_null_schema_to_rust_type_ctx(&items, true, None, ctx));
+    let suffix = match param.location {
+        ParameterIn::Query => "Query",
+        ParameterIn::Header => "Header",
+        ParameterIn::Path | ParameterIn::Cookie => {
+            return Some(non_null_schema_to_rust_type_ctx(items, true, None, ctx));
         }
     };
-    let name = format!(
-        "{}{suffix}",
-        param.parameter_data_ref().name.to_pascal_case()
-    );
+    let name = format!("{}{suffix}", param.name.to_pascal_case());
     Some(non_null_schema_to_rust_type_ctx(
-        &items,
+        items,
         true,
         Some(&name),
         ctx,
@@ -630,16 +620,17 @@ fn query_serialization(
     array_item_type: Option<TokenStream>,
 ) -> QuerySerialization {
     // Per the spec `explode` defaults to true for `form` and false otherwise.
-    let (style, explode) = match param {
-        Parameter::Query { style, .. } => {
-            let kind = match style {
-                QueryStyle::Form => QueryStyleKind::Form,
-                QueryStyle::SpaceDelimited => QueryStyleKind::Space,
-                QueryStyle::PipeDelimited => QueryStyleKind::Pipe,
-                QueryStyle::DeepObject => QueryStyleKind::DeepObject,
+    let (style, explode) = match param.location {
+        ParameterIn::Query => {
+            // `matrix`, `label` and `simple` aren't valid for query params;
+            // they are treated like the default, `form`.
+            let kind = match param.style {
+                Some(ParameterStyle::SpaceDelimited) => QueryStyleKind::Space,
+                Some(ParameterStyle::PipeDelimited) => QueryStyleKind::Pipe,
+                Some(ParameterStyle::DeepObject) => QueryStyleKind::DeepObject,
+                _ => QueryStyleKind::Form,
             };
             let explode = param
-                .parameter_data_ref()
                 .explode
                 .unwrap_or(matches!(kind, QueryStyleKind::Form));
             (kind, explode)
@@ -662,16 +653,19 @@ fn query_serialization(
 /// parameter overrides an earlier (path-level) one with the same key. The
 /// overriding entry keeps the original's position.
 fn resolve_and_merge_params<'a>(
-    all_params: &[&'a ReferenceOr<Parameter>],
+    all_params: &[&'a ObjectOrReference<Parameter>],
     operation_id: &str,
-    openapi: &'a OpenAPI,
+    openapi: &'a Spec,
     diag: &mut Diagnostics,
 ) -> Vec<&'a Parameter> {
     let mut resolved: Vec<&Parameter> = Vec::new();
     for ref_or_param in all_params {
         let param = match ref_or_param {
-            ReferenceOr::Item(p) => p,
-            ReferenceOr::Reference { reference } => {
+            ObjectOrReference::Object(p) => p,
+            ObjectOrReference::Ref {
+                ref_path: reference,
+                ..
+            } => {
                 if let Some(resolved) = resolve_param_ref(reference, openapi) {
                     resolved
                 } else {
@@ -694,41 +688,32 @@ fn resolve_and_merge_params<'a>(
 
 /// The `(name, in)` pair that uniquely identifies a parameter within an
 /// operation, per the `OpenAPI` spec.
-fn param_key(param: &Parameter) -> (&str, &'static str) {
-    let location = match param {
-        Parameter::Path { .. } => "path",
-        Parameter::Query { .. } => "query",
-        Parameter::Header { .. } => "header",
-        Parameter::Cookie { .. } => "cookie",
-    };
-    (param.parameter_data_ref().name.as_str(), location)
+const fn param_key(param: &Parameter) -> (&str, ParameterIn) {
+    (param.name.as_str(), param.location)
 }
 
 /// Resolve a `$ref` to a parameter from the components section.
-fn resolve_param_ref<'a>(reference: &str, openapi: &'a OpenAPI) -> Option<&'a Parameter> {
+fn resolve_param_ref<'a>(reference: &str, openapi: &'a Spec) -> Option<&'a Parameter> {
     let name = reference.strip_prefix("#/components/parameters/")?;
-    openapi.components.as_ref()?.parameters.get(name)?.as_item()
+    as_object(openapi.components.as_ref()?.parameters.get(name)?)
 }
 
-/// Extract the schema for a parameter, resolving component refs if needed.
-fn param_schema(param: &Parameter, openapi: &OpenAPI) -> Option<Schema> {
-    use openapiv3::ParameterSchemaOrContent;
-    let data = param.parameter_data_ref();
-    match &data.format {
-        ParameterSchemaOrContent::Schema(ref_or) => match ref_or {
-            ReferenceOr::Item(s) => Some(s.clone()),
-            ReferenceOr::Reference { reference } => {
-                let name = reference.strip_prefix("#/components/schemas/")?;
-                openapi
-                    .components
-                    .as_ref()?
-                    .schemas
-                    .get(name)?
-                    .as_item()
-                    .cloned()
-            }
-        },
-        ParameterSchemaOrContent::Content(_) => None,
+/// The inline object of `value`, or `None` for a `$ref`.
+const fn as_object<T>(value: &ObjectOrReference<T>) -> Option<&T> {
+    match value {
+        ObjectOrReference::Object(object) => Some(object),
+        ObjectOrReference::Ref { .. } => None,
+    }
+}
+
+/// Extract the schema for a parameter, resolving a component `$ref` if
+/// needed. The result is always an inline schema.
+fn param_schema<'a>(param: &'a Parameter, openapi: &'a Spec) -> Option<&'a Schema> {
+    let schema = param.schema.as_ref()?;
+    match model::view(schema) {
+        model::SchemaRef::Item(_) => Some(schema),
+        model::SchemaRef::Ref(reference) => model::resolve_schema_ref(openapi, reference)
+            .filter(|target| model::item(target).is_some()),
     }
 }
 
@@ -737,22 +722,20 @@ fn param_schema(param: &Parameter, openapi: &OpenAPI) -> Option<Schema> {
 /// Warns when the body has content but none of its media types is supported,
 /// because the operation is then generated without a `body` field.
 fn build_body_info(
-    ref_or_rb: &ReferenceOr<RequestBody>,
-    openapi: &OpenAPI,
+    ref_or_rb: &ObjectOrReference<RequestBody>,
+    openapi: &Spec,
     op_id: &str,
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Option<BodyInfo> {
     let rb = match ref_or_rb {
-        ReferenceOr::Item(r) => r,
-        ReferenceOr::Reference { reference } => {
+        ObjectOrReference::Object(r) => r,
+        ObjectOrReference::Ref {
+            ref_path: reference,
+            ..
+        } => {
             let name = reference.strip_prefix("#/components/requestBodies/")?;
-            openapi
-                .components
-                .as_ref()?
-                .request_bodies
-                .get(name)?
-                .as_item()?
+            as_object(openapi.components.as_ref()?.request_bodies.get(name)?)?
         }
     };
 
@@ -769,7 +752,7 @@ fn build_body_info(
 
     Some(BodyInfo {
         description: rb.description.clone(),
-        required: rb.required,
+        required: rb.required.unwrap_or(false),
         rust_type: resolved.rust_type,
         encoding: resolved.encoding,
     })
@@ -794,17 +777,8 @@ fn is_binary_media_type(content_type: &str) -> bool {
 }
 
 /// True when a schema is `type: string, format: binary`.
-const fn schema_is_binary(ref_or: &ReferenceOr<Schema>) -> bool {
-    match ref_or {
-        ReferenceOr::Item(schema) => matches!(
-            &schema.schema_kind,
-            SchemaKind::Type(Type::String(s)) if matches!(
-                s.format,
-                VariantOrUnknownOrEmpty::Item(StringFormat::Binary)
-            )
-        ),
-        ReferenceOr::Reference { .. } => false,
-    }
+fn schema_is_binary(schema: &Schema) -> bool {
+    model::item(schema).is_some_and(|s| model::is_string_format(s, "binary"))
 }
 
 /// The media type without parameters, trimmed and lowercased:
@@ -833,7 +807,7 @@ fn is_json_media_type(content_type: &str) -> bool {
 /// inline JSON schema that needs its own type (an object, enum or
 /// composition) is synthesized under `type_name` into `ctx`.
 fn media_type_to_rust(
-    content: &indexmap::IndexMap<String, MediaType>,
+    content: &Map<String, MediaType>,
     type_name: &str,
     ctx: &mut CodegenCtx,
 ) -> Option<MediaTypeResolved> {
@@ -867,7 +841,7 @@ fn media_type_to_rust(
 
 /// Resolve media type for a response, emitting a warning for unsupported types.
 fn response_media_type_to_rust(
-    content: &indexmap::IndexMap<String, MediaType>,
+    content: &Map<String, MediaType>,
     type_name: &str,
     ctx: &mut CodegenCtx,
     op_id: &str,
@@ -885,51 +859,38 @@ fn response_media_type_to_rust(
 }
 
 /// Classify how a response header schema is serialized on the wire.
-const fn classify_header_schema(ref_or: &ReferenceOr<Schema>) -> HeaderValueKind {
-    match ref_or {
-        ReferenceOr::Item(schema) => match &schema.schema_kind {
-            SchemaKind::Type(Type::Integer(_)) => HeaderValueKind::Integer,
-            SchemaKind::Type(Type::String(s)) => {
-                if matches!(
-                    s.format,
-                    VariantOrUnknownOrEmpty::Item(StringFormat::DateTime)
-                ) {
-                    HeaderValueKind::DateTime
-                } else {
-                    HeaderValueKind::String
-                }
-            }
-            _ => HeaderValueKind::String,
-        },
-        ReferenceOr::Reference { .. } => HeaderValueKind::String,
+fn classify_header_schema(schema: &Schema) -> HeaderValueKind {
+    match model::item(schema) {
+        Some(s) if model::kind(s) == Kind::Integer => HeaderValueKind::Integer,
+        Some(s) if model::is_string_format(s, "date-time") => HeaderValueKind::DateTime,
+        _ => HeaderValueKind::String,
     }
 }
 
-/// Map a response header schema to its Rust type.
+/// Map a response header schema to its Rust type. A header without a
+/// `schema` (one described by `content`) is a string.
 fn header_schema_to_rust(
-    format: &ParameterSchemaOrContent,
+    schema: Option<&Schema>,
     required: bool,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    match format {
-        ParameterSchemaOrContent::Schema(ref_or) => {
-            non_null_schema_to_rust_type_ctx(ref_or, required, None, ctx)
-        }
-        ParameterSchemaOrContent::Content(_) => {
+    schema.map_or_else(
+        || {
             if required {
                 quote! { ::std::string::String }
             } else {
                 quote! { ::core::option::Option<::std::string::String> }
             }
-        }
-    }
+        },
+        |schema| non_null_schema_to_rust_type_ctx(schema, required, None, ctx),
+    )
 }
 
 /// Build response header metadata from a `Response` object.
 fn build_response_headers(
     resp: &Response,
     op_id: &str,
-    openapi: &OpenAPI,
+    openapi: &Spec,
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Vec<ResponseHeaderInfo> {
@@ -942,8 +903,11 @@ fn build_response_headers(
         }
 
         let header = match ref_or_header {
-            ReferenceOr::Item(h) => h,
-            ReferenceOr::Reference { reference } => {
+            ObjectOrReference::Object(h) => h,
+            ObjectOrReference::Ref {
+                ref_path: reference,
+                ..
+            } => {
                 if let Some(h) = resolve_header_ref(reference, openapi) {
                     h
                 } else {
@@ -965,18 +929,19 @@ fn build_response_headers(
             }
         };
 
-        let rust_type = header_schema_to_rust(&header.format, header.required, ctx);
+        let required = header.required.unwrap_or(false);
+        let rust_type = header_schema_to_rust(header.schema.as_ref(), required, ctx);
 
-        let value_kind = match &header.format {
-            ParameterSchemaOrContent::Schema(ref_or) => classify_header_schema(ref_or),
-            ParameterSchemaOrContent::Content(_) => HeaderValueKind::String,
-        };
+        let value_kind = header
+            .schema
+            .as_ref()
+            .map_or(HeaderValueKind::String, classify_header_schema);
 
         out.push(ResponseHeaderInfo {
             name: name.clone(),
             field_ident,
             description: header.description.clone(),
-            required: header.required,
+            required,
             rust_type,
             value_kind,
         });
@@ -986,35 +951,45 @@ fn build_response_headers(
 }
 
 /// Resolve a `$ref` to a header from the components section.
-fn resolve_header_ref<'a>(reference: &str, openapi: &'a OpenAPI) -> Option<&'a Header> {
+fn resolve_header_ref<'a>(reference: &str, openapi: &'a Spec) -> Option<&'a Header> {
     let name = reference.strip_prefix("#/components/headers/")?;
-    openapi.components.as_ref()?.headers.get(name)?.as_item()
+    as_object(openapi.components.as_ref()?.headers.get(name)?)
 }
 
 /// Build response info list from an `OpenAPI` responses object.
 fn build_responses(
-    responses: &Responses,
-    openapi: &OpenAPI,
+    responses: &Map<String, ObjectOrReference<Response>>,
+    openapi: &Spec,
     op_id: &str,
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Vec<ResponseInfo> {
     let mut out = Vec::new();
+    let mut default = None;
 
-    for (status_code, ref_or_resp) in &responses.responses {
-        let n = match status_code {
-            // openapiv3 already rejects codes outside 100..=999 at parse time;
-            // the guard keeps the invariant the server codegen relies on explicit.
-            StatusCode::Code(n) if (100..=999).contains(n) => *n,
-            StatusCode::Code(n) => {
+    for (key, ref_or_resp) in responses {
+        let n = match model::parse_status_key(key) {
+            // The guard keeps the invariant the server codegen relies on.
+            StatusKey::Code(n) if (100..=999).contains(&n) => n,
+            StatusKey::Code(n) => {
                 diag.warn(format!(
                     "operation `{op_id}`: response status `{n}` is not a valid HTTP status code (must be 100..=999) and was skipped"
                 ));
                 continue;
             }
-            StatusCode::Range(n) => {
+            StatusKey::Range(n) => {
                 diag.warn(format!(
                     "operation `{op_id}`: response status range `{n}XX` is not supported and was skipped"
+                ));
+                continue;
+            }
+            StatusKey::Default => {
+                default = Some(ref_or_resp);
+                continue;
+            }
+            StatusKey::Invalid => {
+                diag.warn(format!(
+                    "operation `{op_id}`: response key `{key}` is not a status code, a range or `default`, and was skipped"
                 ));
                 continue;
             }
@@ -1029,7 +1004,7 @@ fn build_responses(
         ));
     }
 
-    if let Some(ref_or_default) = &responses.default {
+    if let Some(ref_or_default) = default {
         out.extend(build_response(
             ref_or_default,
             ResponseStatus::Default,
@@ -1046,9 +1021,9 @@ fn build_responses(
 /// Build the [`ResponseInfo`] for one response (a numbered one or `default`):
 /// its body type and headers. Returns `None` when its `$ref` can't be resolved.
 fn build_response(
-    ref_or_resp: &ReferenceOr<Response>,
+    ref_or_resp: &ObjectOrReference<Response>,
     status: ResponseStatus,
-    openapi: &OpenAPI,
+    openapi: &Spec,
     op_id: &str,
     ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
@@ -1058,8 +1033,11 @@ fn build_response(
         ResponseStatus::Default => ("`default`".to_owned(), "DefaultBody".to_owned()),
     };
     let resp = match ref_or_resp {
-        ReferenceOr::Item(r) => r,
-        ReferenceOr::Reference { reference } => {
+        ObjectOrReference::Object(r) => r,
+        ObjectOrReference::Ref {
+            ref_path: reference,
+            ..
+        } => {
             if let Some(r) = resolve_response_ref(reference, openapi) {
                 r
             } else {
@@ -1092,7 +1070,7 @@ fn build_response(
 
     Some(ResponseInfo {
         status,
-        description: resp.description.clone(),
+        description: resp.description.clone().unwrap_or_default(),
         rust_type,
         encoding,
         headers,
@@ -1100,9 +1078,9 @@ fn build_response(
 }
 
 /// Resolve a `$ref` to a response from the components section.
-fn resolve_response_ref<'a>(reference: &str, openapi: &'a OpenAPI) -> Option<&'a Response> {
+fn resolve_response_ref<'a>(reference: &str, openapi: &'a Spec) -> Option<&'a Response> {
     let name = reference.strip_prefix("#/components/responses/")?;
-    openapi.components.as_ref()?.responses.get(name)?.as_item()
+    as_object(openapi.components.as_ref()?.responses.get(name)?)
 }
 
 /// Emit a `compile_error!` token for each fatal operation diagnostic.
@@ -1452,7 +1430,7 @@ mod tests {
 
     /// Parse a spec and collect its operations + diagnostics.
     fn collect(spec: &str) -> (Vec<OperationInfo>, Diagnostics) {
-        let openapi: OpenAPI = serde_yaml::from_str(spec).expect("spec parses");
+        let openapi = crate::spec::load_spec(spec).expect("spec parses");
         collect_operations(&openapi, &[], &mut CodegenCtx::new(&openapi))
     }
 

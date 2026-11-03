@@ -3,7 +3,7 @@ pub mod api_trait;
 /// Axum router code generation.
 pub mod router;
 
-use openapiv3::OpenAPI;
+use oas3::Spec as OpenAPI;
 use proc_macro2::TokenStream;
 use quote::quote;
 

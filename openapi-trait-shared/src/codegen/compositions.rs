@@ -8,8 +8,11 @@
 //!   `#[serde(flatten)]` fields; inline object branches inline their properties
 //!   directly.
 //!
-//! `SchemaKind::Not` and `SchemaKind::Any` remain unsupported and continue to
-//! fall back to `serde_json::Value` in [`super::types`].
+//! A `{type: "null"}` branch adds no variant or field: it makes the
+//! composition nullable instead (see [`super::model::is_nullable`]).
+//!
+//! `not` and unconstrained schemas remain unsupported and continue to fall
+//! back to `serde_json::Value` in [`super::types`].
 //!
 //! Inline (non-top-level) compositions are synthesized into top-level types
 //! using a deterministic name derived from the enclosing context (object name +
@@ -17,11 +20,12 @@
 //! alongside the explicit `components/schemas` items so all generated types
 //! live at module scope.
 
-use openapiv3::{Discriminator, ReferenceOr, Schema, SchemaKind, Type};
+use oas3::spec::{Discriminator, Schema};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ctx::CodegenCtx;
+use super::model::{self, Kind, SchemaRef};
 use super::schemas::{doc_attr, model_derives, object_field_tokens};
 use super::types::schema_to_rust_type_ctx;
 
@@ -32,7 +36,7 @@ use super::types::schema_to_rust_type_ctx;
 #[must_use]
 pub fn generate_one_of(
     name: &str,
-    variants: &[ReferenceOr<Schema>],
+    variants: &[Schema],
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
     ctx: &mut CodegenCtx,
@@ -48,7 +52,7 @@ pub fn generate_one_of(
 #[must_use]
 pub fn generate_any_of(
     name: &str,
-    variants: &[ReferenceOr<Schema>],
+    variants: &[Schema],
     description: Option<&String>,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
@@ -64,7 +68,7 @@ pub fn generate_any_of(
 #[must_use]
 pub fn generate_all_of(
     name: &str,
-    variants: &[ReferenceOr<Schema>],
+    variants: &[Schema],
     description: Option<&String>,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
@@ -74,9 +78,9 @@ pub fn generate_all_of(
     let mut fields: Vec<TokenStream> = Vec::new();
     let mut ref_field_counter = 0usize;
 
-    for branch in variants {
-        match branch {
-            ReferenceOr::Reference { reference } => {
+    for branch in model::non_null_branches(variants) {
+        match model::view(branch) {
+            SchemaRef::Ref(reference) => {
                 ref_field_counter += 1;
                 let field_ident = format_ident!("inner_{}", ref_field_counter);
                 let ty = ctx.ref_type(reference);
@@ -85,13 +89,13 @@ pub fn generate_all_of(
                     pub #field_ident: #ty,
                 });
             }
-            ReferenceOr::Item(schema) => {
-                if let SchemaKind::Type(Type::Object(obj)) = &schema.schema_kind {
+            SchemaRef::Item(obj) => {
+                if model::kind(obj) == Kind::Object {
                     for (prop_name, prop_ref) in &obj.properties {
                         let is_required = obj.required.iter().any(|r| r == prop_name);
                         fields.push(object_field_tokens(
                             prop_name,
-                            &prop_ref.clone().unbox(),
+                            prop_ref,
                             is_required,
                             name,
                             ctx,
@@ -103,12 +107,7 @@ pub fn generate_all_of(
                     ref_field_counter += 1;
                     let field_ident = format_ident!("inner_{}", ref_field_counter);
                     let parent = format!("{name}Inner{ref_field_counter}");
-                    let ty = schema_to_rust_type_ctx(
-                        &ReferenceOr::Item(schema.clone()),
-                        true,
-                        Some(&parent),
-                        ctx,
-                    );
+                    let ty = schema_to_rust_type_ctx(branch, true, Some(&parent), ctx);
                     fields.push(quote! {
                         #[serde(flatten)]
                         pub #field_ident: #ty,
@@ -131,7 +130,7 @@ pub fn generate_all_of(
 /// Shared helper backing [`generate_one_of`] and [`generate_any_of`].
 fn generate_enum(
     name: &str,
-    variants: &[ReferenceOr<Schema>],
+    variants: &[Schema],
     discriminator: Option<&Discriminator>,
     description: Option<&String>,
     ctx: &mut CodegenCtx,
@@ -147,8 +146,7 @@ fn generate_enum(
         },
     );
 
-    let variant_tokens: Vec<TokenStream> = variants
-        .iter()
+    let variant_tokens: Vec<TokenStream> = model::non_null_branches(variants)
         .enumerate()
         .map(|(idx, branch)| build_enum_variant(name, idx, branch, discriminator, ctx))
         .collect();
@@ -168,13 +166,13 @@ fn generate_enum(
 fn build_enum_variant(
     parent: &str,
     idx: usize,
-    branch: &ReferenceOr<Schema>,
+    branch: &Schema,
     discriminator: Option<&Discriminator>,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    match branch {
-        ReferenceOr::Reference { reference } => {
-            let target_name = reference.rsplit('/').next().unwrap_or(reference);
+    match model::view(branch) {
+        SchemaRef::Ref(reference) => {
+            let target_name = model::ref_name(reference);
             let variant_ident = super::idents::schema_type_ident(target_name);
             let ty = ctx.ref_type(reference);
             // For tagged enums the rename governs the discriminator value on
@@ -188,15 +186,10 @@ fn build_enum_variant(
                 #variant_ident(#ty)
             }
         }
-        ReferenceOr::Item(schema) => {
+        SchemaRef::Item(_) => {
             let variant_ident = format_ident!("Variant{}", idx + 1);
             let parent_for_synth = format!("{parent}Variant{}", idx + 1);
-            let ty = schema_to_rust_type_ctx(
-                &ReferenceOr::Item(schema.clone()),
-                true,
-                Some(&parent_for_synth),
-                ctx,
-            );
+            let ty = schema_to_rust_type_ctx(branch, true, Some(&parent_for_synth), ctx);
             quote! {
                 #variant_ident(#ty)
             }
@@ -208,9 +201,10 @@ fn build_enum_variant(
 /// `$ref`. Matches both fully qualified refs and bare component names, mirroring
 /// the `OpenAPI` spec which permits either form in `discriminator.mapping`.
 fn discriminator_key_for_ref(d: &Discriminator, reference: &str) -> Option<String> {
-    let bare = reference.rsplit('/').next().unwrap_or(reference);
+    let bare = model::ref_name(reference);
     d.mapping
         .iter()
+        .flatten()
         .find(|(_, v)| *v == reference || *v == bare)
         .map(|(k, _)| k.clone())
 }

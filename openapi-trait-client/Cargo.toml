@@ -24,9 +24,8 @@ validation = ["openapi-trait-shared/validation"]
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
-openapiv3 = "2"
+oas3 = "0.22"
 serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 heck = "0.5"
 openapi-trait-shared = { path = "../openapi-trait-shared", version = "0.0.9" }
 

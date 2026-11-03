@@ -3,7 +3,7 @@ mod client_trait;
 /// Generated reqwest-backed client implementations.
 mod reqwest_impl;
 
-use openapiv3::OpenAPI;
+use oas3::Spec as OpenAPI;
 use proc_macro2::TokenStream;
 use quote::quote;
 

@@ -1,6 +1,8 @@
 # OpenAPI support
 
-openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
+openapi-trait reads OpenAPI **3.0** and **3.1** documents in YAML or JSON.
+Swagger (OpenAPI 2.0) documents are rejected with a compile error; convert them
+to OpenAPI 3 first.
 
 ## Schemas
 
@@ -8,8 +10,10 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 |---|---|
 | `components/schemas` → structs | ✅ |
 | Required vs. optional properties | ✅ optional properties become `Option<T>` and are left out of the JSON when `None` |
-| `nullable: true` | ✅ `Option<T>`, also for array items and map values; ignored for parameters and headers |
+| `nullable: true` (3.0), `type: [T, "null"]` (3.1) | ✅ `Option<T>`, also for array items and map values; ignored for parameters and headers |
+| `oneOf` / `anyOf` with a `{type: "null"}` branch | ✅ `Option<T>` of the other branch; with several other branches, an `Option` of the enum |
 | String enums | ✅ Rust enums, with `#[serde(rename)]` per variant |
+| `const` (3.1) on a string | ✅ a one-variant enum |
 | `additionalProperties` | ✅ `HashMap<String, T>` |
 | String `format` | ✅ `date-time` → `chrono::DateTime<Utc>`, `date` → `chrono::NaiveDate`, `uuid` → `uuid::Uuid`, `binary` → `Vec<u8>`; other formats, including `email`, stay `String` (`chrono` and `uuid` are re-exported) |
 | `oneOf` | ✅ a tagged enum if a `discriminator` is present, otherwise `#[serde(untagged)]` |
@@ -18,8 +22,8 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | Inline objects, enums and compositions in properties | ✅ lifted to `{ParentStruct}{Property}` |
 | Inline request and response body schemas | ✅ `Body` and `Status{code}Body` in the operation's module |
 | Recursive schemas | ✅ the field that closes a cycle becomes `Box<T>` (`Option<Box<T>>` when optional); references inside arrays and maps aren't boxed |
-| `not`, unconstrained schemas | fall back to `serde_json::Value` |
-| Constraints (`minLength`, `minimum`, `pattern`, …) | ✅ with the [`validation`](validation.md) feature |
+| `not`, unconstrained schemas, several types (`type: [string, integer]`) | fall back to `serde_json::Value` |
+| Constraints (`minLength`, `minimum`, `pattern`, …) | ✅ with the [`validation`](validation.md) feature; `exclusiveMinimum` / `exclusiveMaximum` in both their 3.0 (boolean) and 3.1 (numeric) form |
 
 ## Operations
 
@@ -47,6 +51,18 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | `oauth2`, `openIdConnect` | ✅ handled like `http` bearer; scopes are not checked |
 
 See [Security](security.md) for details.
+
+## OpenAPI 3.1
+
+A 3.0 document is converted to 3.1 when it's read, so both versions produce the
+same code. These 3.1 features are ignored:
+
+- `prefixItems`, `if` / `then` / `else`, `dependentSchemas`,
+  `patternProperties`, `unevaluatedProperties` and `$dynamicRef`
+- keywords next to a `$ref`
+- `contentEncoding` and `contentMediaType`; use `format: binary` or a binary
+  media type for binary bodies
+- `webhooks` and `components/pathItems`
 
 ## Not supported
 
