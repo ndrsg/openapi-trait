@@ -1172,6 +1172,10 @@ fn generate_param_enums(op: &OperationInfo) -> TokenStream {
                 #[derive(
                     ::core::fmt::Debug,
                     ::core::clone::Clone,
+                    ::core::marker::Copy,
+                    ::core::cmp::PartialEq,
+                    ::core::cmp::Eq,
+                    ::core::hash::Hash,
                     ::serde::Serialize,
                     ::serde::Deserialize,
                 )]

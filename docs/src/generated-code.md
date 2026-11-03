@@ -31,6 +31,11 @@ schema. The module holds:
 | `Body`, `Status{code}Body` | the request or response body schema is inline |
 | `{Param}Path`, `{Param}Query` enums | a path or query parameter (or the items of an array query parameter) is an inline enum |
 
+Schema types derive `Debug`, `Clone`, `PartialEq`, `Serialize` and
+`Deserialize`. String enums (component schemas and parameter enums) also
+derive `Copy`, `Eq` and `Hash`, so they can be used as map keys. Structs don't
+derive `Eq`, because a field may be a float.
+
 ## Naming rules
 
 - **Types** use PascalCase of the schema key (`pet_status` → `PetStatus`).

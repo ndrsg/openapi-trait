@@ -114,7 +114,7 @@ pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
         })
         .collect::<Vec<_>>();
 
-    let derives = model_derives();
+    let derives = string_enum_derives();
     quote! {
         #doc
         #derives
@@ -290,6 +290,34 @@ pub fn model_derives() -> TokenStream {
         #[derive(
             ::core::fmt::Debug,
             ::core::clone::Clone,
+            ::core::cmp::PartialEq,
+            ::serde::Serialize,
+            ::serde::Deserialize
+            #extra
+        )]
+    }
+}
+
+/// The `#[derive(...)]` attribute applied to every generated string enum.
+///
+/// Like [`model_derives`], plus `Eq`, `Hash` and `Copy`: a string enum has only
+/// unit variants, so it can be compared exactly, used as a map key and copied.
+/// Structs don't get `Eq`, because their fields may be floats.
+#[must_use]
+pub fn string_enum_derives() -> TokenStream {
+    #[cfg(feature = "validation")]
+    let extra = quote! { , ::openapi_trait::serde_valid::Validate };
+    #[cfg(not(feature = "validation"))]
+    let extra = quote! {};
+
+    quote! {
+        #[derive(
+            ::core::fmt::Debug,
+            ::core::clone::Clone,
+            ::core::marker::Copy,
+            ::core::cmp::PartialEq,
+            ::core::cmp::Eq,
+            ::core::hash::Hash,
             ::serde::Serialize,
             ::serde::Deserialize
             #extra

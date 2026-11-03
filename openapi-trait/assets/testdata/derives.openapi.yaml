@@ -1,0 +1,60 @@
+# Regression fixture for KNOWN_ISSUES.md D6: generated types derive
+# `PartialEq`, and string enums also derive `Eq`, `Hash` and `Copy`.
+openapi: 3.0.3
+info:
+  title: Derives
+  version: "1.0"
+paths:
+  /things/{kind}:
+    get:
+      operationId: getThing
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema: { type: string, enum: [big, small] }
+        - name: order
+          in: query
+          required: false
+          schema: { type: string, enum: [asc, desc] }
+        - name: tag
+          in: query
+          required: false
+          schema:
+            type: array
+            items: { type: string, enum: [new, old] }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Thing' }
+components:
+  schemas:
+    Color:
+      type: string
+      enum: [red, green]
+    Thing:
+      type: object
+      required: [weight, color]
+      properties:
+        weight: { type: number }
+        color: { $ref: '#/components/schemas/Color' }
+        shape: { $ref: '#/components/schemas/Shape' }
+        extra:
+          type: object
+          additionalProperties: true
+    Circle:
+      type: object
+      required: [radius]
+      properties:
+        radius: { type: number }
+    Square:
+      type: object
+      required: [side]
+      properties:
+        side: { type: integer }
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
