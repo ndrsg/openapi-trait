@@ -1,0 +1,59 @@
+# Regression fixture for KNOWN_ISSUES.md D1: the `default` response keeps its
+# body type and headers, and carries the status code it is sent with.
+openapi: 3.0.3
+info:
+  title: Default response
+  version: "1.0"
+paths:
+  /things/{id}:
+    get:
+      operationId: getThing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: found
+          content:
+            application/json:
+              schema: { type: string }
+        default:
+          description: any error
+          headers:
+            X-Trace-Id:
+              required: true
+              schema: { type: string }
+            Retry-After:
+              schema: { type: integer }
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      operationId: deleteThing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '204':
+          description: deleted
+        default:
+          description: any error, as an inline body
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reason]
+                properties:
+                  reason: { type: string }
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        default:
+          description: no body
+components:
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer }
+        message: { type: string }

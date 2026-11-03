@@ -8,7 +8,7 @@ items:
 | Structs and enums with `serde` derives | `components/schemas` | ✅ | ✅ |
 | A module per operation, named like its method (`get_pet`) | operations | ✅ | ✅ |
 | `{operation}::Request` struct | path, query and header parameters, plus `body` | ✅ | ✅ |
-| `{operation}::Response` enum, one `Status{code}` variant per response | `responses` | ✅ | ✅ |
+| `{operation}::Response` enum, one `Status{code}` variant per response, plus `Default { status, … }` for `default` | `responses` | ✅ | ✅ |
 | `impl IntoResponse` for each response enum | | ✅ | |
 | Credential structs (`BearerAuth`, `ApiKey`, …) | `securitySchemes` | ✅ | ✅ |
 | `{operation}::Auth` enum, for operations that accept several schemes | `security` | ✅ | ✅ |
@@ -28,7 +28,7 @@ schema. The module holds:
 | `Context` (the handler's argument: `req`, `auth`, `headers`) | always, server only |
 | `Auth` | the operation accepts more than one security scheme |
 | `Status{code}` payload struct (body plus headers) | the response declares headers |
-| `Body`, `Status{code}Body` | the request or response body schema is inline |
+| `Body`, `Status{code}Body`, `DefaultBody` | the request or response body schema is inline |
 | `{Param}Path`, `{Param}Query`, `{Param}Header` enums | a path, query or header parameter (or the items of an array query or header parameter) is an inline enum |
 
 Schema types derive `Debug`, `Clone`, `PartialEq`, `Serialize` and

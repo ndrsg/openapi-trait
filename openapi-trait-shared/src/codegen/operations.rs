@@ -1002,20 +1002,6 @@ fn build_responses(
     let mut out = Vec::new();
 
     for (status_code, ref_or_resp) in &responses.responses {
-        let resp = match ref_or_resp {
-            ReferenceOr::Item(r) => r,
-            ReferenceOr::Reference { reference } => {
-                if let Some(r) = resolve_response_ref(reference, openapi) {
-                    r
-                } else {
-                    diag.warn(format!(
-                        "operation `{op_id}`: could not resolve response $ref `{reference}`; response skipped"
-                    ));
-                    continue;
-                }
-            }
-        };
-
         let n = match status_code {
             // openapiv3 already rejects codes outside 100..=999 at parse time;
             // the guard keeps the invariant the server codegen relies on explicit.
@@ -1033,53 +1019,84 @@ fn build_responses(
                 continue;
             }
         };
-
-        let headers = build_response_headers(resp, op_id, openapi, ctx, diag);
-        let media = response_media_type_to_rust(
-            &resp.content,
-            &format!("Status{n}Body"),
-            ctx,
+        out.extend(build_response(
+            ref_or_resp,
+            ResponseStatus::Code(n),
+            openapi,
             op_id,
-            &format!("status `{n}`"),
+            ctx,
             diag,
-        );
-        let (rust_type, encoding) =
-            media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
-
-        out.push(ResponseInfo {
-            status: ResponseStatus::Code(n),
-            description: resp.description.clone(),
-            rust_type,
-            encoding,
-            headers,
-        });
+        ));
     }
 
-    // Handle default response
     if let Some(ref_or_default) = &responses.default {
-        let resp = match ref_or_default {
-            ReferenceOr::Item(r) => r,
-            ReferenceOr::Reference { reference } => {
-                if let Some(r) = resolve_response_ref(reference, openapi) {
-                    r
-                } else {
-                    diag.warn(format!(
-                        "operation `{op_id}`: could not resolve default response $ref `{reference}`; default response skipped"
-                    ));
-                    return out;
-                }
-            }
-        };
-        out.push(ResponseInfo {
-            status: ResponseStatus::Default,
-            description: resp.description.clone(),
-            rust_type: None,
-            encoding: None,
-            headers: Vec::new(),
-        });
+        out.extend(build_response(
+            ref_or_default,
+            ResponseStatus::Default,
+            openapi,
+            op_id,
+            ctx,
+            diag,
+        ));
     }
 
     out
+}
+
+/// Build the [`ResponseInfo`] for one response (a numbered one or `default`):
+/// its body type and headers. Returns `None` when its `$ref` can't be resolved.
+fn build_response(
+    ref_or_resp: &ReferenceOr<Response>,
+    status: ResponseStatus,
+    openapi: &OpenAPI,
+    op_id: &str,
+    ctx: &mut CodegenCtx,
+    diag: &mut Diagnostics,
+) -> Option<ResponseInfo> {
+    let (label, body_name) = match status {
+        ResponseStatus::Code(n) => (format!("status `{n}`"), format!("Status{n}Body")),
+        ResponseStatus::Default => ("`default`".to_owned(), "DefaultBody".to_owned()),
+    };
+    let resp = match ref_or_resp {
+        ReferenceOr::Item(r) => r,
+        ReferenceOr::Reference { reference } => {
+            if let Some(r) = resolve_response_ref(reference, openapi) {
+                r
+            } else {
+                diag.warn(format!(
+                    "operation `{op_id}`: could not resolve the $ref `{reference}` of response {label}; response skipped"
+                ));
+                return None;
+            }
+        }
+    };
+
+    let mut headers = build_response_headers(resp, op_id, openapi, ctx, diag);
+    if matches!(status, ResponseStatus::Default) {
+        // The `Default` variant holds `status` and `body` next to the header
+        // fields, so a header can't use either name.
+        headers.retain(|h| {
+            let clash = h.field_ident == "status" || h.field_ident == "body";
+            if clash {
+                diag.warn(format!(
+                    "operation `{op_id}`: header `{}` of response `default` clashes with the `{}` field of the `Default` variant and was skipped",
+                    h.name, h.field_ident
+                ));
+            }
+            !clash
+        });
+    }
+    let media = response_media_type_to_rust(&resp.content, &body_name, ctx, op_id, &label, diag);
+    let (rust_type, encoding) =
+        media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
+
+    Some(ResponseInfo {
+        status,
+        description: resp.description.clone(),
+        rust_type,
+        encoding,
+        headers,
+    })
 }
 
 /// Resolve a `$ref` to a response from the components section.
@@ -1346,9 +1363,25 @@ fn generate_response_enum(op: &OperationInfo, binary: &BinaryBodyTypes) -> Token
                     }
                 }
                 ResponseStatus::Default => {
+                    let body = response_body_type(r, binary).map(|ty| quote! { body: #ty, });
+                    let headers = r.headers.iter().map(|h| {
+                        let field_ident = &h.field_ident;
+                        let ftype = &h.rust_type;
+                        let fdoc = doc_attr(&h.description);
+                        quote! {
+                            #fdoc
+                            #field_ident: #ftype,
+                        }
+                    });
                     quote! {
                         #vdoc
-                        Default(::std::string::String)
+                        Default {
+                            /// The HTTP status code, any code the operation
+                            /// doesn't declare.
+                            status: ::openapi_trait::http::StatusCode,
+                            #body
+                            #(#headers)*
+                        }
                     }
                 }
             }
@@ -1919,5 +1952,35 @@ paths:
             diag.warnings.is_empty(),
             "no warnings for a clean operation"
         );
+    }
+
+    #[test]
+    fn default_response_header_clashing_with_variant_fields_is_skipped() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        default:
+          description: error
+          headers:
+            Status: { schema: { type: string } }
+            X-Trace: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { type: string }
+"#,
+        );
+        let resp = &ops[0].responses[0];
+        assert!(matches!(resp.status, ResponseStatus::Default));
+        assert!(resp.rust_type.is_some(), "default body must be typed");
+        let names: Vec<&str> = resp.headers.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, ["X-Trace"]);
+        assert_eq!(diag.warnings.len(), 1, "{:?}", diag.warnings);
+        assert!(diag.warnings[0].contains("`Status`"), "{:?}", diag.warnings);
     }
 }

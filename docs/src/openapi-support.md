@@ -33,7 +33,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | Other request body media types (`text/plain`, forms, multipart) | not supported: the body is skipped with a warning |
 | Binary request bodies | ✅ streamed: `axum::body::Body` on the server, `reqwest::Body` on the client |
 | One response enum per operation | ✅ |
-| `default` responses | ✅ `Default(...)` variant |
+| `default` responses | ✅ a `Default { status, body, … }` variant, typed like a numbered response (body and headers); `status` is any status the operation doesn't declare |
 | Response headers (`Content-Disposition`, `ETag`, `Cache-Control`, …) | ✅ a payload struct holding the body and headers |
 | Binary downloads | ✅ streamed: `axum::body::Body` on the server, `openapi_trait::ByteStream` on the client |
 

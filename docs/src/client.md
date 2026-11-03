@@ -57,7 +57,8 @@ Then call operations through the trait:
 The generated implementation returns `Reqwest{Mod}ClientError`, an enum
 covering transport errors, missing credentials, malformed response headers,
 and status codes the spec doesn't declare (`UnexpectedStatus`, which includes
-the body).
+the body). When the operation has a `default` response, an undeclared status
+isn't an error: it's decoded into `Response::Default { status, body, … }`.
 
 ## Per-request headers and auth
 

@@ -748,6 +748,7 @@ dependencies = [
  "form_urlencoded",
  "futures-core",
  "futures-util",
+ "http",
  "http-body-util",
  "openapi-trait-axum",
  "openapi-trait-client",
