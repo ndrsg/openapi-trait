@@ -37,6 +37,7 @@ pub fn generate_client(
             response: quote!(::openapi_trait::ByteStream),
         },
         &auth_schemes,
+        &|_| TokenStream::new(),
     );
 
     let auth_types = generate_scheme_types(&auth_schemes);

@@ -7,7 +7,7 @@ use openapiv3::OpenAPI;
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use api_trait::generate_trait;
+use api_trait::{generate_context, generate_trait};
 use openapi_trait_shared::codegen::{
     ctx::{root_module, CodegenCtx},
     operations::{
@@ -33,6 +33,7 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
             response: quote!(::axum::body::Body),
         },
         &auth_schemes,
+        &|op| generate_context(op, &auth_schemes),
     );
 
     let auth_types = generate_scheme_types(&auth_schemes);
@@ -44,7 +45,7 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
             .collect::<Vec<_>>(),
     );
 
-    let api_trait = generate_trait(mod_ident, &ops, &auth_schemes);
+    let api_trait = generate_trait(mod_ident, &ops);
     let router = generate_router(mod_ident, &ops, &auth_schemes);
 
     let root = root_module();

@@ -12,7 +12,7 @@ items:
 | `impl IntoResponse` for each response enum | | ✅ | |
 | Credential structs (`BearerAuth`, `ApiKey`, …) | `securitySchemes` | ✅ | ✅ |
 | `{operation}::Auth` enum, for operations that accept several schemes | `security` | ✅ | ✅ |
-| `PetsApi<S = ()>` trait with a `router()` method | operations | ✅ | |
+| `PetsApi` trait with a `router()` method | operations | ✅ | |
 | `NotImplemented` marker error | | ✅ | |
 | `PetsClient` trait | operations | | ✅ |
 | `PetsAuthState`, `PetsClientAuth`, `ReqwestPetsClientError`, and the blanket reqwest impl | security schemes, operations | | ✅ (with `reqwest-client`) |
@@ -25,6 +25,7 @@ schema. The module holds:
 | Item | When |
 |---|---|
 | `Request`, `Response` | always |
+| `Context` (the handler's argument: `req`, `auth`, `headers`) | always, server only |
 | `Auth` | the operation accepts more than one security scheme |
 | `Status{code}` payload struct (body plus headers) | the response declares headers |
 | `Body`, `Status{code}Body` | the request or response body schema is inline |

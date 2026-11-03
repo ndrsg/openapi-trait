@@ -1,6 +1,6 @@
 # Implementing a server
 
-`#[openapi_trait::axum(...)]` generates a `{Mod}Api<S>` trait with one async
+`#[openapi_trait::axum(...)]` generates a `{Mod}Api` trait with one async
 method per operation, plus a `router()` method that wires it to an
 `axum::Router`.
 
@@ -14,15 +14,25 @@ method per operation, plus a `router()` method that wires it to an
 {{#include ../../openapi-trait/examples/server.rs:impl}}
 ```
 
-Each method receives, in order:
+Each method receives one argument, the operation's `{operation}::Context`:
 
-1. **`req`**, the operation's `{operation}::Request` struct. It holds path,
-   query and header parameters as typed fields, and the request body as
-   `body`.
-2. **`auth`**, only if the operation is secured. See [Security](security.md).
-3. **`state`**, an `axum::extract::State<S>` for your application state.
-4. **`headers`**, the raw `axum::http::HeaderMap`, for anything the spec
-   doesn't model.
+- **`req`**, the operation's `{operation}::Request` struct. It holds path,
+  query and header parameters as typed fields, and the request body as
+  `body`.
+- **`auth`**, only if the operation is secured. See [Security](security.md).
+- **`headers`**, the raw `axum::http::HeaderMap`, for anything the spec
+  doesn't model.
+
+Use the fields directly (`ctx.req.pet_id`) or destructure what you need:
+
+```rust,ignore
+let pets::get_pet::Context { req, auth, .. } = ctx;
+```
+
+The `..` is required: `Context` has a private field, so new fields can be
+added without breaking your code. To call a handler directly, for example
+in a unit test, build one with `Context::new(req, auth, headers)` (`auth`
+only for secured operations).
 
 It returns `Result<{operation}::Response, Self::Error>`. The response enum has
 one variant per declared status code (`Status200(Pet)`, `Status404`, …), and
@@ -30,8 +40,9 @@ each variant implements `IntoResponse` with the matching status and body.
 
 ## Application state
 
-The type parameter `S` of `PetsApi<S>` is your axum state type. It defaults to
-`()`, so stateless servers can write `impl pets::PetsApi for MyServer`.
+Keep application state in the type that implements the trait, and reach it
+through `&self`. The router wraps the implementation in an `Arc`, so it is
+shared, not cloned, per request.
 
 ```rust,ignore
 {{#include ../../openapi-trait/examples/server.rs:state}}
@@ -43,8 +54,17 @@ The type parameter `S` of `PetsApi<S>` is your axum state type. It defaults to
 {{#include ../../openapi-trait/examples/server.rs:main}}
 ```
 
-`router()` returns a plain `axum::Router<S>`, so you can `.merge()` it, `.nest()`
-it, or add tower layers like any other router.
+`router()` returns a plain `axum::Router`, so you can `.merge()` it, `.nest()`
+it, or add tower layers like any other router. To combine it with routes that
+use axum state, convert it with `.with_state(())`, which yields a
+`Router<S>` for any `S`:
+
+```rust,ignore
+let app = axum::Router::new()
+    .route("/health", get(health))
+    .merge(PetServer::default().router().with_state(()))
+    .with_state(app_state);
+```
 
 ## Unimplemented operations and errors
 

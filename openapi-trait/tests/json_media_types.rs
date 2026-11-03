@@ -21,10 +21,9 @@ impl server::ServerApi for Server {
 
     async fn patch_thing(
         &self,
-        req: server::patch_thing::Request,
-        _state: axum::extract::State<()>,
-        headers: axum::http::HeaderMap,
+        ctx: server::patch_thing::Context,
     ) -> Result<server::patch_thing::Response, Self::Error> {
+        let server::patch_thing::Context { req, headers, .. } = ctx;
         if req.id != 1 {
             return Ok(server::patch_thing::Response::Status404(server::Problem {
                 title: "no such thing".into(),
@@ -53,9 +52,7 @@ async fn spawn_server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Server.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Server.router()).await.unwrap();
     });
     format!("http://{addr}")
 }

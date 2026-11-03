@@ -32,13 +32,10 @@ impl pets::PetsApi for PetServer {
 
     async fn get_pet(
         &self,
-        req: pets::get_pet::Request,
-        _auth: pets::BearerAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: pets::get_pet::Context,
     ) -> Result<pets::get_pet::Response, Self::Error> {
         Ok(pets::get_pet::Response::Status200(pets::Pet {
-            id: req.pet_id,
+            id: ctx.req.pet_id,
             name: "doggie".into(),
             status: None,
         }))
@@ -47,7 +44,7 @@ impl pets::PetsApi for PetServer {
 }
 
 use pets::PetsApi as _;
-let app: axum::Router = PetServer.router().with_state(());
+let app: axum::Router = PetServer.router();
 ```
 
 ## Client

@@ -40,7 +40,7 @@ async fn axum_server_routes_matched_path() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let app = MockPetstore.router().with_state(());
+    let app = MockPetstore.router();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -63,7 +63,7 @@ async fn axum_server_returns_404_for_unknown_route() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let app = MockPetstore.router().with_state(());
+    let app = MockPetstore.router();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });
@@ -83,11 +83,9 @@ impl petstore::PetstoreApi for RichMockPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore::get_pet_by_id::Request,
-        _auth: petstore::get_pet_by_id::Auth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: petstore::get_pet_by_id::Context,
     ) -> Result<petstore::get_pet_by_id::Response, Self::Error> {
+        let petstore::get_pet_by_id::Context { req, .. } = ctx;
         if req.pet_id == 42 {
             Ok(petstore::get_pet_by_id::Response::Status200(
                 petstore::Pet {
@@ -110,7 +108,7 @@ async fn axum_server_get_pet_by_id_returns_200_and_404() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let app = RichMockPetstore.router().with_state(());
+    let app = RichMockPetstore.router();
     tokio::spawn(async move {
         axum::serve(listener, app).await.unwrap();
     });

@@ -20,10 +20,9 @@ impl server::ServerApi for Server {
 
     async fn create_thing(
         &self,
-        req: server::create_thing::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: server::create_thing::Context,
     ) -> Result<server::create_thing::Response, Self::Error> {
+        let server::create_thing::Context { req, .. } = ctx;
         let server::create_thing::Body { name, size } = req.body;
         if name.is_empty() {
             return Ok(server::create_thing::Response::Status400(
@@ -43,9 +42,7 @@ impl server::ServerApi for Server {
 
     async fn list_things(
         &self,
-        _req: server::list_things::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        _ctx: server::list_things::Context,
     ) -> Result<server::list_things::Response, Self::Error> {
         Ok(server::list_things::Response::Status200(vec![
             server::list_things::Status200Body { id: Some(7) },
@@ -54,9 +51,7 @@ impl server::ServerApi for Server {
 
     async fn get_status(
         &self,
-        _req: server::get_status::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        _ctx: server::get_status::Context,
     ) -> Result<server::get_status::Response, Self::Error> {
         Ok(server::get_status::Response::Status200(
             server::get_status::Status200Body::Down,
@@ -76,9 +71,7 @@ async fn client() -> Client {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Server.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Server.router()).await.unwrap();
     });
     Client {
         http: reqwest::Client::new(),
