@@ -175,9 +175,9 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
         .map(|r| match &r.status {
             ResponseStatus::Code(n) => {
                 let variant_ident = format_ident!("Status{}", n);
-                let status_ident = status_code_ident(*n);
+                let status_code = status_code_expr(*n);
                 if !r.headers.is_empty() {
-                    generate_payload_into_response_arm(op, r, *n, &variant_ident, &status_ident)
+                    generate_payload_into_response_arm(op, r, *n, &variant_ident, &status_code)
                 } else if let Some(rust_type) = &r.rust_type {
                     let _ = rust_type;
                     match r.encoding.as_ref() {
@@ -186,7 +186,7 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                             quote! {
                                 Self::#variant_ident(body) => {
                                     (
-                                        ::axum::http::StatusCode::#status_ident,
+                                        #status_code,
                                         [(::axum::http::header::CONTENT_TYPE, #ct)],
                                         body,
                                     ).into_response()
@@ -196,7 +196,7 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                         _ => {
                             quote! {
                                 Self::#variant_ident(body) => (
-                                    ::axum::http::StatusCode::#status_ident,
+                                    #status_code,
                                     ::axum::Json(body),
                                 ).into_response(),
                             }
@@ -205,7 +205,7 @@ fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
                 } else {
                     quote! {
                         Self::#variant_ident => {
-                            ::axum::http::StatusCode::#status_ident
+                            #status_code
                                 .into_response()
                         },
                     }
@@ -240,14 +240,14 @@ fn generate_payload_into_response_arm(
     r: &openapi_trait_shared::codegen::operations::ResponseInfo,
     _status: u16,
     variant_ident: &syn::Ident,
-    status_ident: &syn::Ident,
+    status_code: &TokenStream,
 ) -> TokenStream {
     let body_response = match (&r.rust_type, &r.encoding) {
         (Some(_), Some(BodyEncoding::Bytes { content_type })) => {
             let ct = content_type.as_str();
             quote! {
                 let mut response = (
-                    ::axum::http::StatusCode::#status_ident,
+                    #status_code,
                     [(::axum::http::header::CONTENT_TYPE, #ct)],
                     payload.body,
                 )
@@ -257,7 +257,7 @@ fn generate_payload_into_response_arm(
         (Some(_), _) => {
             quote! {
                 let mut response = (
-                    ::axum::http::StatusCode::#status_ident,
+                    #status_code,
                     ::axum::Json(payload.body),
                 )
                     .into_response();
@@ -265,7 +265,7 @@ fn generate_payload_into_response_arm(
         }
         (None, _) => {
             quote! {
-                let mut response = ::axum::http::StatusCode::#status_ident.into_response();
+                let mut response = #status_code.into_response();
             }
         }
     };
@@ -321,32 +321,16 @@ fn generate_response_header_insert(header: &ResponseHeaderInfo) -> TokenStream {
     }
 }
 
-/// Map a numeric HTTP status code to an `axum::http::StatusCode` constant ident.
-fn status_code_ident(n: u16) -> proc_macro2::Ident {
-    // Map common status codes to axum's StatusCode constants
-    let name = match n {
-        200 => "OK",
-        201 => "CREATED",
-        202 => "ACCEPTED",
-        204 => "NO_CONTENT",
-        301 => "MOVED_PERMANENTLY",
-        302 => "FOUND",
-        304 => "NOT_MODIFIED",
-        400 => "BAD_REQUEST",
-        401 => "UNAUTHORIZED",
-        403 => "FORBIDDEN",
-        404 => "NOT_FOUND",
-        405 => "METHOD_NOT_ALLOWED",
-        409 => "CONFLICT",
-        410 => "GONE",
-        422 => "UNPROCESSABLE_ENTITY",
-        429 => "TOO_MANY_REQUESTS",
-        501 => "NOT_IMPLEMENTED",
-        502 => "BAD_GATEWAY",
-        503 => "SERVICE_UNAVAILABLE",
-        _ => "INTERNAL_SERVER_ERROR",
-    };
-    format_ident!("{}", name)
+/// Emit an expression yielding the `axum::http::StatusCode` for `n`.
+///
+/// The shared codegen only admits codes in `100..=999` (the range
+/// `StatusCode::from_u16` accepts), so the fallback is unreachable in practice;
+/// it exists only to avoid a panic path in generated code.
+fn status_code_expr(n: u16) -> TokenStream {
+    quote! {
+        ::axum::http::StatusCode::from_u16(#n)
+            .unwrap_or(::axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+    }
 }
 
 /// Generate the route call for one operation.

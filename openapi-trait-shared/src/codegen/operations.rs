@@ -816,7 +816,15 @@ fn build_responses(
             media.map_or((None, None), |m| (Some(m.rust_type), Some(m.encoding)));
 
         let status = match status_code {
-            StatusCode::Code(n) => ResponseStatus::Code(*n),
+            // openapiv3 already rejects codes outside 100..=999 at parse time;
+            // the guard keeps the invariant the server codegen relies on explicit.
+            StatusCode::Code(n) if (100..=999).contains(n) => ResponseStatus::Code(*n),
+            StatusCode::Code(n) => {
+                diag.warn(format!(
+                    "operation `{op_id}`: response status `{n}` is not a valid HTTP status code (must be 100..=999) and was skipped"
+                ));
+                continue;
+            }
             StatusCode::Range(n) => {
                 diag.warn(format!(
                     "operation `{op_id}`: response status range `{n}XX` is not supported and was skipped"
