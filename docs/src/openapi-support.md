@@ -7,7 +7,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | Feature | Status |
 |---|---|
 | `components/schemas` → structs | ✅ |
-| Required vs. optional properties | ✅ optional properties become `Option<T>` |
+| Required vs. optional properties | ✅ optional properties become `Option<T>` and are left out of the JSON when `None` |
 | `nullable: true` | ✅ `Option<T>`, also for array items and map values; ignored for parameters and headers |
 | String enums | ✅ Rust enums, with `#[serde(rename)]` per variant |
 | `additionalProperties` | ✅ `HashMap<String, T>` |

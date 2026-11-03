@@ -237,6 +237,15 @@ pub fn object_field_tokens(
         ReferenceOr::Reference { .. } => quote! {},
     };
 
+    // An optional field is left out when `None` instead of being sent as
+    // `null`, which the spec only allows for nullable fields. A required
+    // nullable field is still sent as an explicit `null`.
+    let skip_attr = if is_required {
+        quote! {}
+    } else {
+        quote! { #[serde(default, skip_serializing_if = "::core::option::Option::is_none")] }
+    };
+
     let synth_name = format!("{parent_struct_name}{}", prop_name.to_pascal_case());
     let field_type = schema_to_rust_type_ctx(
         prop_ref_or,
@@ -262,6 +271,7 @@ pub fn object_field_tokens(
     quote! {
         #field_doc
         #rename_attr
+        #skip_attr
         #validate_attrs
         pub #field_ident: #field_type,
     }
