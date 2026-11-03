@@ -271,8 +271,12 @@ pub fn doc_attr(description: &Option<String>) -> TokenStream {
         .map_or_else(|| quote! {}, |d| quote! { #[doc = #d] })
 }
 
-/// The `#[derive(...)]` attribute applied to every generated model struct and
+/// The `#[derive(...)]` and `#[serde(crate)]` attributes applied to every generated model struct and
 /// enum.
+///
+/// `serde` is reached through the facade's re-export, and
+/// `#[serde(crate = "...")]` tells the derives to do the same, so users don't
+/// need `serde` as a dependency.
 ///
 /// With the `validation` feature enabled, `serde_valid::Validate` is appended so
 /// the generated field-level `#[validate(...)]` attributes take effect and
@@ -291,14 +295,15 @@ pub fn model_derives() -> TokenStream {
             ::core::fmt::Debug,
             ::core::clone::Clone,
             ::core::cmp::PartialEq,
-            ::serde::Serialize,
-            ::serde::Deserialize
+            ::openapi_trait::serde::Serialize,
+            ::openapi_trait::serde::Deserialize
             #extra
         )]
+        #[serde(crate = "::openapi_trait::serde")]
     }
 }
 
-/// The `#[derive(...)]` attribute applied to every generated string enum.
+/// The derive attributes applied to every generated string enum.
 ///
 /// Like [`model_derives`], plus `Eq`, `Hash` and `Copy`: a string enum has only
 /// unit variants, so it can be compared exactly, used as a map key and copied.
@@ -318,9 +323,10 @@ pub fn string_enum_derives() -> TokenStream {
             ::core::cmp::PartialEq,
             ::core::cmp::Eq,
             ::core::hash::Hash,
-            ::serde::Serialize,
-            ::serde::Deserialize
+            ::openapi_trait::serde::Serialize,
+            ::openapi_trait::serde::Deserialize
             #extra
         )]
+        #[serde(crate = "::openapi_trait::serde")]
     }
 }

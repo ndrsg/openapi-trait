@@ -50,10 +50,10 @@ pub fn generate_reqwest_impl(
         // string. Serializing through `serde_json` honors `#[serde(rename)]` on
         // enum variants and the string encodings of dates/uuids; reqwest then
         // percent-encodes as it assembles the URL.
-        fn query_value(value: &impl ::serde::Serialize) -> ::std::string::String {
-            match ::serde_json::to_value(value) {
-                ::core::result::Result::Ok(::serde_json::Value::String(s)) => s,
-                ::core::result::Result::Ok(::serde_json::Value::Null) => ::std::string::String::new(),
+        fn query_value(value: &impl ::openapi_trait::serde::Serialize) -> ::std::string::String {
+            match ::openapi_trait::serde_json::to_value(value) {
+                ::core::result::Result::Ok(::openapi_trait::serde_json::Value::String(s)) => s,
+                ::core::result::Result::Ok(::openapi_trait::serde_json::Value::Null) => ::std::string::String::new(),
                 ::core::result::Result::Ok(other) => other.to_string(),
                 ::core::result::Result::Err(_) => ::std::string::String::new(),
             }
