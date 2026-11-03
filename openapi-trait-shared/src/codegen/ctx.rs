@@ -2,7 +2,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
+use heck::ToPascalCase;
+use openapiv3::{OpenAPI, PathItem, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::quote;
 
@@ -34,6 +35,9 @@ pub struct CodegenCtx {
     /// Whether the current position is below an object property of `owner`
     /// (a struct field), rather than directly in a composition.
     in_property: bool,
+    /// Type identifiers already taken in the generated module (see
+    /// [`CodegenCtx::reserve_type_name`]).
+    type_names: BTreeSet<String>,
 }
 
 impl CodegenCtx {
@@ -59,7 +63,28 @@ impl CodegenCtx {
             reaches_via_compositions: reachability(&compositions_only),
             owner: None,
             in_property: false,
+            type_names: fixed_type_names(openapi),
         }
+    }
+
+    /// Reserve a type name for a type synthesized from `candidate`, such as
+    /// an inline property schema (`PersonAddress`).
+    ///
+    /// Returns `candidate` when its identifier is still free, and otherwise
+    /// the first free `{candidate}2`, `{candidate}3`, …, so a synthesized type
+    /// never clashes with a component schema, an operation type or another
+    /// synthesized type.
+    pub fn reserve_type_name(&mut self, candidate: &str) -> String {
+        let mut name = candidate.to_owned();
+        let mut n = 1u32;
+        while !self
+            .type_names
+            .insert(super::idents::schema_type_ident(&name).to_string())
+        {
+            n += 1;
+            name = format!("{candidate}{n}");
+        }
+        name
     }
 
     /// Take the inline types synthesized so far, leaving the sink empty.
@@ -129,6 +154,42 @@ impl CodegenCtx {
             ident
         }
     }
+}
+
+/// The type identifiers the generated module defines under fixed names:
+/// component schemas, security schemes, and the per-operation
+/// `{Op}Request`, `{Op}Response`, `{Op}Auth` and `{Op}Status{code}` types.
+fn fixed_type_names(openapi: &OpenAPI) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    if let Some(components) = &openapi.components {
+        for name in components
+            .schemas
+            .keys()
+            .chain(components.security_schemes.keys())
+        {
+            names.insert(super::idents::schema_type_ident(name).to_string());
+        }
+    }
+    let operations = openapi
+        .paths
+        .iter()
+        .filter_map(|(_, item)| item.as_item())
+        .flat_map(PathItem::iter);
+    for (_, op) in operations {
+        let Some(op_id) = &op.operation_id else {
+            continue;
+        };
+        let base = op_id.to_pascal_case();
+        for suffix in ["Request", "Response", "Auth"] {
+            names.insert(format!("{base}{suffix}"));
+        }
+        for status in op.responses.responses.keys() {
+            if let openapiv3::StatusCode::Code(n) = status {
+                names.insert(format!("{base}Status{n}"));
+            }
+        }
+    }
+    names
 }
 
 /// The component name a `$ref` points at: `#/components/schemas/Foo` → `Foo`.

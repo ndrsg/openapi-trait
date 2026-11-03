@@ -1,0 +1,68 @@
+# Regression fixture for KNOWN_ISSUES.md C5: names synthesized for inline
+# schemas must not collide with component schemas or operation types.
+openapi: 3.0.1
+info:
+  title: name_collisions
+  version: 0.0.1
+paths:
+  /things/{kind}:
+    post:
+      operationId: createThing
+      parameters:
+        # Would be `CreateThingKindPath`, which is a component schema below.
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [a, b] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateThing' }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Person' }
+components:
+  schemas:
+    # `Person.address` would be named `PersonAddress`, which is taken.
+    PersonAddress:
+      type: object
+      properties:
+        x: { type: string }
+    Person:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            y: { type: string }
+    # `CreateThing.request` would be named `CreateThingRequest`, which is the
+    # request struct of operation `createThing`.
+    CreateThing:
+      type: object
+      properties:
+        request:
+          type: object
+          properties:
+            z: { type: string }
+    # The extra entries' inline type would be `BagAdditionalProperties`.
+    BagAdditionalProperties:
+      type: object
+      properties:
+        unrelated: { type: boolean }
+    Bag:
+      type: object
+      properties:
+        label: { type: string }
+      additionalProperties:
+        type: object
+        properties:
+          count: { type: integer }
+    # The item enum of an array alias used to be named after the alias itself.
+    Colors:
+      type: array
+      items: { type: string, enum: [red, green] }
+    CreateThingKindPath:
+      type: object
+      properties:
+        w: { type: string }

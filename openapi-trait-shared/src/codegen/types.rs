@@ -41,9 +41,9 @@ pub fn non_null_schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool
 /// Context-aware variant of [`schema_to_rust_type`].
 ///
 /// When `parent_name` is `Some` and an inline composition is encountered, a
-/// top-level type definition is appended to `ctx.inline_types` (`parent_name`
-/// is used verbatim as the type ident) and the returned token stream references
-/// that ident.
+/// top-level type definition is appended to `ctx.inline_types` and the
+/// returned token stream references it. The type is named `parent_name`, or
+/// `parent_name` with a numeric suffix if that name is already taken.
 #[must_use]
 pub fn schema_to_rust_type_ctx(
     ref_or: &ReferenceOr<Schema>,
@@ -167,9 +167,10 @@ fn synthesize_inline_string_enum(
     parent_name.map_or_else(
         || quote! { ::std::string::String },
         |name| {
-            let tokens = super::schemas::generate_string_enum(name, schema);
+            let name = ctx.reserve_type_name(name);
+            let tokens = super::schemas::generate_string_enum(&name, schema);
             ctx.inline_types.push(tokens);
-            let ident = super::idents::schema_type_ident(name);
+            let ident = super::idents::schema_type_ident(&name);
             quote! { #ident }
         },
     )
@@ -178,6 +179,9 @@ fn synthesize_inline_string_enum(
 /// Either synthesize a top-level composition type (when a parent name is
 /// available) and return a reference to it, or fall back to
 /// `serde_json::Value`.
+///
+/// The parent name is reserved in [`CodegenCtx`] first, so a clash with an
+/// existing type gets a numeric suffix (`PersonAddress2`).
 fn synthesize_inline_composition(
     parent_name: Option<&str>,
     ctx: &mut CodegenCtx,
@@ -186,9 +190,10 @@ fn synthesize_inline_composition(
     parent_name.map_or_else(
         || quote! { ::serde_json::Value },
         |name| {
-            let tokens = generate(name, ctx);
+            let name = ctx.reserve_type_name(name);
+            let tokens = generate(&name, ctx);
             ctx.inline_types.push(tokens);
-            let ident = super::idents::schema_type_ident(name);
+            let ident = super::idents::schema_type_ident(&name);
             quote! { #ident }
         },
     )

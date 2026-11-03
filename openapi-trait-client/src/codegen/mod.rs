@@ -29,7 +29,7 @@ pub fn generate_client(
     let auth_schemes = collect_schemes(openapi);
     let mut ctx = CodegenCtx::new(openapi);
     let schema_types = generate_schemas(openapi, &mut ctx);
-    let (ops, diagnostics) = collect_operations(openapi, &auth_schemes);
+    let (ops, diagnostics) = collect_operations(openapi, &auth_schemes, &mut ctx);
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(

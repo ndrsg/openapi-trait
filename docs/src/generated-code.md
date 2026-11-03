@@ -35,6 +35,11 @@ items:
   - an inline query enum becomes `{OperationId}{Param}Query`, and an inline
     path enum becomes `{OperationId}{Param}Path`.
 
+  If that name is already taken by a component schema, an operation type
+  (`{OperationId}Request`, …) or another lifted type, a numeric suffix is
+  added: with a `PersonAddress` schema, `Person.address` becomes
+  `PersonAddress2`.
+
 The best way to see what a spec produces is to
 [dump the generated code](debugging.md), or to add
 [`source_file`](go-to-definition.md) and jump into the code from your IDE.

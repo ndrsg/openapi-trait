@@ -7,6 +7,7 @@ use openapiv3::{
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
+use super::ctx::CodegenCtx;
 use super::idents;
 use super::schemas::doc_attr;
 use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
@@ -267,6 +268,7 @@ impl Diagnostics {
 pub fn collect_operations(
     openapi: &OpenAPI,
     schemes: &[SchemeInfo],
+    ctx: &mut CodegenCtx,
 ) -> (Vec<OperationInfo>, Diagnostics) {
     let mut ops = Vec::new();
     let mut diag = Diagnostics::default();
@@ -281,9 +283,14 @@ pub fn collect_operations(
             }
         };
         for (method, operation) in path_item_operations(item) {
-            if let Some(info) =
-                build_operation_info(path, &method, operation, item, openapi, schemes, &mut diag)
-            {
+            if let Some(info) = build_operation_info(
+                (path, item),
+                (&method, operation),
+                openapi,
+                schemes,
+                ctx,
+                &mut diag,
+            ) {
                 ops.push(info);
             }
         }
@@ -321,14 +328,14 @@ fn path_item_operations(item: &PathItem) -> Vec<(String, &Operation)> {
     out
 }
 
-/// Build an `OperationInfo` for a single operation in the path item.
+/// Build an `OperationInfo` for the operation `method` of the path item at
+/// `path`.
 fn build_operation_info(
-    path: &str,
-    method: &str,
-    operation: &Operation,
-    path_item: &PathItem,
+    (path, path_item): (&str, &PathItem),
+    (method, operation): (&str, &Operation),
     openapi: &OpenAPI,
     schemes: &[SchemeInfo],
+    ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Option<OperationInfo> {
     let Some(operation_id) = operation.operation_id.clone() else {
@@ -361,7 +368,7 @@ fn build_operation_info(
     all_params.extend(path_item.parameters.iter());
     all_params.extend(operation.parameters.iter());
     let (path_params, query_params, header_params) =
-        collect_params(&all_params, &operation_id, method, path, openapi, diag)?;
+        collect_params(&all_params, &operation_id, method, path, openapi, ctx, diag)?;
 
     let body = operation
         .request_body
@@ -399,6 +406,7 @@ fn collect_params(
     method: &str,
     path: &str,
     openapi: &OpenAPI,
+    ctx: &mut CodegenCtx,
     diag: &mut Diagnostics,
 ) -> Option<(Vec<ParamInfo>, Vec<ParamInfo>, Vec<ParamInfo>)> {
     let mut path_params = Vec::new();
@@ -431,11 +439,11 @@ fn collect_params(
             enum_suffix,
             param_schema.as_ref().filter(|s| is_string_enum(s)),
         ) {
-            let name = format!(
+            let name = ctx.reserve_type_name(&format!(
                 "{}{}{suffix}",
                 operation_id.to_pascal_case(),
                 data.name.to_pascal_case()
-            );
+            ));
             let ident = match idents::type_ident(&name, operation_id) {
                 Ok(id) => id,
                 Err(msg) => {
@@ -1259,7 +1267,7 @@ mod tests {
     /// Parse a spec and collect its operations + diagnostics.
     fn collect(spec: &str) -> (Vec<OperationInfo>, Diagnostics) {
         let openapi: OpenAPI = serde_yaml::from_str(spec).expect("spec parses");
-        collect_operations(&openapi, &[])
+        collect_operations(&openapi, &[], &mut CodegenCtx::new(&openapi))
     }
 
     fn test_binary_types() -> BinaryBodyTypes {
