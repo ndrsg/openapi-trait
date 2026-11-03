@@ -620,9 +620,9 @@ fn generate_response_header_read(
                         .and_then(|v| v.to_str().ok())
                         .map(::std::string::String::from)
                     {
-                        ::core::option::Option::Some(v) => ::core::result::Result::Ok(v),
+                        ::core::option::Option::Some(v) => v,
                         ::core::option::Option::None => #missing,
-                    }?
+                    }
                 }
             } else {
                 quote! {
