@@ -8,14 +8,12 @@ use proc_macro2::TokenStream;
 use quote::quote;
 
 use openapi_trait_shared::codegen::{
-    ctx::CodegenCtx,
+    ctx::{root_module, CodegenCtx},
     operations::{
         collect_operations, generate_operation_errors, generate_operation_types, BinaryBodyTypes,
     },
     schemas::generate_schemas,
-    security::{
-        collect_schemes, generate_op_auth_enum, generate_scheme_types, resolve_alternatives,
-    },
+    security::{collect_schemes, generate_scheme_types},
 };
 
 use self::{client_trait::generate_trait, reqwest_impl::generate_reqwest_impl};
@@ -30,8 +28,6 @@ pub fn generate_client(
     let mut ctx = CodegenCtx::new(openapi);
     let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes, &mut ctx);
-    // Types synthesized for inline request and response bodies.
-    let op_inline_types = ctx.take_inline_types();
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(
@@ -40,16 +36,10 @@ pub fn generate_client(
             request: quote!(::openapi_trait::reqwest::Body),
             response: quote!(::openapi_trait::ByteStream),
         },
+        &auth_schemes,
     );
 
     let auth_types = generate_scheme_types(&auth_schemes);
-    let op_auth_enums: Vec<TokenStream> = ops
-        .iter()
-        .filter_map(|op| {
-            let alts = resolve_alternatives(&op.auth, &auth_schemes);
-            generate_op_auth_enum(&op.operation_id, &alts)
-        })
-        .collect();
     let unsupported_and = openapi_trait_shared::codegen::security::generate_unsupported_and_errors(
         &ops.iter()
             .filter(|op| op.auth.had_unsupported_and)
@@ -64,14 +54,15 @@ pub fn generate_client(
         TokenStream::default()
     };
 
+    let root = root_module();
+
     quote! {
         use super::*;
+        #root
         #op_errors
         #unsupported_and
         #schema_types
         #auth_types
-        #(#op_auth_enums)*
-        #(#op_inline_types)*
         #op_types
         #client_trait
         #reqwest_impl

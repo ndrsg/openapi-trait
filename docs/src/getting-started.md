@@ -62,8 +62,8 @@ Trait names come from the module name in PascalCase:
 | `mod petstore {}` | `petstore::PetstoreApi` | `petstore::PetstoreClient` | `petstore::PetstoreAuthState` |
 
 Types inside the module are named after the spec: `components/schemas/Pet`
-becomes `pets::Pet`, and operation `getPet` becomes `pets::GetPetRequest` and
-`pets::GetPetResponse`.
+becomes `pets::Pet`, and operation `getPet` becomes `pets::get_pet::Request` and
+`pets::get_pet::Response`.
 
 ## Next steps
 

@@ -6,14 +6,29 @@ items:
 | Item | Generated from | `axum` | `client` |
 |---|---|:-:|:-:|
 | Structs and enums with `serde` derives | `components/schemas` | ✅ | ✅ |
-| `{OperationId}Request` struct | path, query and header parameters, plus `body` | ✅ | ✅ |
-| `{OperationId}Response` enum, one `Status{code}` variant per response | `responses` | ✅ | ✅ |
+| A module per operation, named like its method (`get_pet`) | operations | ✅ | ✅ |
+| `{operation}::Request` struct | path, query and header parameters, plus `body` | ✅ | ✅ |
+| `{operation}::Response` enum, one `Status{code}` variant per response | `responses` | ✅ | ✅ |
 | `impl IntoResponse` for each response enum | | ✅ | |
-| Credential structs (`BearerAuth`, `ApiKey`, …) and `{OperationId}Auth` enums | `securitySchemes`, `security` | ✅ | ✅ |
+| Credential structs (`BearerAuth`, `ApiKey`, …) | `securitySchemes` | ✅ | ✅ |
+| `{operation}::Auth` enum, for operations that accept several schemes | `security` | ✅ | ✅ |
 | `PetsApi<S = ()>` trait with a `router()` method | operations | ✅ | |
 | `NotImplemented` marker error | | ✅ | |
 | `PetsClient` trait | operations | | ✅ |
 | `PetsAuthState`, `PetsClientAuth`, `ReqwestPetsClientError`, and the blanket reqwest impl | security schemes, operations | | ✅ (with `reqwest-client`) |
+
+Each operation's types live in its own module, so they can't clash with
+schemas or with each other: operation `createPet` gets
+`pets::create_pet::Request` even if the spec also has a `CreatePetRequest`
+schema. The module holds:
+
+| Item | When |
+|---|---|
+| `Request`, `Response` | always |
+| `Auth` | the operation accepts more than one security scheme |
+| `Status{code}` payload struct (body plus headers) | the response declares headers |
+| `Body`, `Status{code}Body` | the request or response body schema is inline |
+| `{Param}Path`, `{Param}Query` enums | a path or query parameter (or the items of an array query parameter) is an inline enum |
 
 ## Naming rules
 
@@ -28,18 +43,13 @@ items:
   `VSelf`) and `Empty` for `""`. Values that map to the same name get a numeric
   suffix (`created_at`, `createdAt` → `CreatedAt`, `CreatedAt2`). The wire value
   is always kept with `#[serde(rename = "…")]`.
-- **Inline schemas** are lifted to the top level and named after where they
-  appear:
-  - a nested object or composition in a property becomes
-    `{ParentStruct}{Property}`;
-  - an inline request body schema becomes `{OperationId}Body`, and an
-    inline response body schema becomes `{OperationId}Status{code}Body`;
-  - an inline query enum, or the inline enum items of an array query
-    parameter, becomes `{OperationId}{Param}Query`, and an inline path enum
-    becomes `{OperationId}{Param}Path`.
+- **Inline schemas** get a type named after where they appear. A nested
+  object or composition in a property becomes `{ParentStruct}{Property}`, at
+  the top level. Inline bodies and parameter enums go into the operation's
+  module (see above), and their nested types are named the same way
+  (`create_pet::BodyOwner`).
 
-  If that name is already taken by a component schema, an operation type
-  (`{OperationId}Request`, …) or another lifted type, a numeric suffix is
+  If that name is already taken in the same module, a numeric suffix is
   added: with a `PersonAddress` schema, `Person.address` becomes
   `PersonAddress2`.
 

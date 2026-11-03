@@ -7,32 +7,10 @@ use quote::quote;
 
 use super::ctx::CodegenCtx;
 
-/// Map an `OpenAPI` `Schema` (or `$ref`) to a Rust type `TokenStream`.
-///
-/// The result is wrapped in `Option<T>` when `required` is false or the schema
-/// is `nullable: true`.
-///
-/// This is the context-free entry point: any inline `oneOf` / `allOf` / `anyOf`
-/// encountered along the way falls back to `serde_json::Value`. Use
-/// [`schema_to_rust_type_ctx`] when a parent name is available so that inline
-/// compositions can be synthesized into named top-level types.
-#[must_use]
-pub fn schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
-    // No parent name means no synthesis, so a throwaway context is enough.
-    schema_to_rust_type_ctx(ref_or, required, None, &mut CodegenCtx::default())
-}
-
-/// Like [`schema_to_rust_type`], but ignores `nullable: true`.
+/// Like [`schema_to_rust_type_ctx`], but ignores `nullable: true`.
 ///
 /// Used for parameters and headers: they can't carry a JSON `null` on the
 /// wire, so `nullable` must not change their type.
-#[must_use]
-pub fn non_null_schema_to_rust_type(ref_or: &ReferenceOr<Schema>, required: bool) -> TokenStream {
-    non_null_schema_to_rust_type_ctx(ref_or, required, None, &mut CodegenCtx::default())
-}
-
-/// Like [`schema_to_rust_type_ctx`], but ignores `nullable: true` (see
-/// [`non_null_schema_to_rust_type`]).
 #[must_use]
 pub fn non_null_schema_to_rust_type_ctx(
     ref_or: &ReferenceOr<Schema>,
@@ -50,7 +28,11 @@ pub fn non_null_schema_to_rust_type_ctx(
     schema_to_rust_type_ctx(ref_or, required, parent_name, ctx)
 }
 
-/// Context-aware variant of [`schema_to_rust_type`].
+/// Map an `OpenAPI` `Schema` (or `$ref`) to a Rust type `TokenStream`.
+///
+/// The result is wrapped in `Option<T>` when `required` is false or the schema
+/// is `nullable: true`. References go through [`CodegenCtx::ref_type`], so
+/// they are boxed or qualified as the current position needs.
 ///
 /// When `parent_name` is `Some` and an inline composition is encountered, a
 /// top-level type definition is appended to `ctx.inline_types` and the
@@ -182,8 +164,7 @@ fn synthesize_inline_string_enum(
             let name = ctx.reserve_type_name(name);
             let tokens = super::schemas::generate_string_enum(&name, schema);
             ctx.inline_types.push(tokens);
-            let ident = super::idents::schema_type_ident(&name);
-            quote! { #ident }
+            ctx.local_type(&super::idents::schema_type_ident(&name))
         },
     )
 }
@@ -205,8 +186,7 @@ fn synthesize_inline_composition(
             let name = ctx.reserve_type_name(name);
             let tokens = generate(&name, ctx);
             ctx.inline_types.push(tokens);
-            let ident = super::idents::schema_type_ident(&name);
-            quote! { #ident }
+            ctx.local_type(&super::idents::schema_type_ident(&name))
         },
     )
 }

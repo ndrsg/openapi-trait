@@ -23,8 +23,8 @@ pub fn generate_trait(mod_ident: &syn::Ident, ops: &[OperationInfo]) -> TokenStr
 /// Generate a single trait method for one operation.
 fn generate_trait_method(op: &OperationInfo) -> TokenStream {
     let method_ident = &op.method_ident;
-    let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
-    let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
+    let req_ident = op.request_path();
+    let resp_ident = op.response_path();
 
     let doc = match (&op.summary, &op.description) {
         (Some(summary), Some(description)) if summary != description => {

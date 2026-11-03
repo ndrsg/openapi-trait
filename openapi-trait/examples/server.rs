@@ -29,29 +29,29 @@ impl pets::PetsApi<AppState> for PetServer {
 
     async fn list_pets(
         &self,
-        req: pets::ListPetsRequest,
+        req: pets::list_pets::Request,
         state: axum::extract::State<AppState>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pets::ListPetsResponse, Self::Error> {
+    ) -> Result<pets::list_pets::Response, Self::Error> {
         let store = state.pets.lock().unwrap();
         let limit = req
             .limit
             .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(0));
-        Ok(pets::ListPetsResponse::Status200(
+        Ok(pets::list_pets::Response::Status200(
             store.iter().take(limit).cloned().collect(),
         ))
     }
 
     async fn create_pet(
         &self,
-        req: pets::CreatePetRequest,
+        req: pets::create_pet::Request,
         auth: pets::BearerAuth,
         state: axum::extract::State<AppState>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pets::CreatePetResponse, Self::Error> {
+    ) -> Result<pets::create_pet::Response, Self::Error> {
         // The macro only extracts the token; checking it is up to you.
         if auth.0 != "secret" {
-            return Ok(pets::CreatePetResponse::Status401);
+            return Ok(pets::create_pet::Response::Status401);
         }
         let mut store = state.pets.lock().unwrap();
         let pet = pets::Pet {
@@ -61,24 +61,24 @@ impl pets::PetsApi<AppState> for PetServer {
         };
         store.push(pet.clone());
         drop(store);
-        Ok(pets::CreatePetResponse::Status201(pet))
+        Ok(pets::create_pet::Response::Status201(pet))
     }
 
     async fn get_pet(
         &self,
-        req: pets::GetPetRequest,
+        req: pets::get_pet::Request,
         _auth: pets::BearerAuth,
         state: axum::extract::State<AppState>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<pets::GetPetResponse, Self::Error> {
+    ) -> Result<pets::get_pet::Response, Self::Error> {
         let store = state.pets.lock().unwrap();
         Ok(store
             .iter()
             .find(|pet| pet.id == req.pet_id)
             .cloned()
             .map_or(
-                pets::GetPetResponse::Status404,
-                pets::GetPetResponse::Status200,
+                pets::get_pet::Response::Status404,
+                pets::get_pet::Response::Status200,
             ))
     }
 }

@@ -21,10 +21,9 @@ use syn::{parse_macro_input, ItemMod};
 /// compile time and replaces the module's contents with:
 ///
 /// - Schema structs derived from `components/schemas`
-/// - A `{OperationId}Request` struct per operation (bundles path, query,
-///   header params and the request body)
-/// - Per-operation `{OperationId}Response` enums implementing
-///   [`axum::response::IntoResponse`](https://docs.rs/axum/latest/axum/response/trait.IntoResponse.html)
+/// - A module per operation (`get_pet`), holding a `Request` struct (bundles
+///   path, query, header params and the request body) and a `Response` enum
+///   implementing [`axum::response::IntoResponse`](https://docs.rs/axum/latest/axum/response/trait.IntoResponse.html)
 /// - A `{ModName}Api<S = ()>` trait with one `async fn` per operation (keyed by
 ///   `operationId`). Trait methods have a default implementation that returns
 ///   `500 Internal Server Error`, so you only need to override the operations

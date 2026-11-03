@@ -23,10 +23,9 @@ use syn::{parse_macro_input, DeriveInput, ItemMod};
 /// compile time and replaces the module's contents with:
 ///
 /// - Schema structs derived from `components/schemas`
-/// - A `{OperationId}Request` struct per operation (bundles path, query,
-///   header params and the request body)
-/// - Per-operation `{OperationId}Response` enums whose variants map to HTTP
-///   status codes
+/// - A module per operation (`get_pet`), holding a `Request` struct (bundles
+///   path, query, header params and the request body) and a `Response` enum
+///   whose variants map to HTTP status codes
 /// - A `{ModName}Client` trait with one method per operation (keyed by
 ///   `operationId`)
 /// - When the `reqwest-client` cargo feature is enabled through

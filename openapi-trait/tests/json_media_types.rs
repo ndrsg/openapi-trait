@@ -21,12 +21,12 @@ impl server::ServerApi for Server {
 
     async fn patch_thing(
         &self,
-        req: server::PatchThingRequest,
+        req: server::patch_thing::Request,
         _state: axum::extract::State<()>,
         headers: axum::http::HeaderMap,
-    ) -> Result<server::PatchThingResponse, Self::Error> {
+    ) -> Result<server::patch_thing::Response, Self::Error> {
         if req.id != 1 {
-            return Ok(server::PatchThingResponse::Status404(server::Problem {
+            return Ok(server::patch_thing::Response::Status404(server::Problem {
                 title: "no such thing".into(),
             }));
         }
@@ -35,7 +35,7 @@ impl server::ServerApi for Server {
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default();
         let name = req.body.name.unwrap_or_default();
-        Ok(server::PatchThingResponse::Status200(format!(
+        Ok(server::patch_thing::Response::Status200(format!(
             "{content_type} {name}"
         )))
     }
@@ -68,7 +68,7 @@ async fn client_sends_the_declared_json_content_type() {
     };
     let response = client
         .patch_thing(
-            remote::PatchThingRequest {
+            remote::patch_thing::Request {
                 id: 1,
                 body: remote::ThingPatch {
                     name: Some("x".into()),
@@ -79,10 +79,10 @@ async fn client_sends_the_declared_json_content_type() {
         .await
         .unwrap();
     match response {
-        remote::PatchThingResponse::Status200(echo) => {
+        remote::patch_thing::Response::Status200(echo) => {
             assert_eq!(echo, "application/merge-patch+json x");
         }
-        other @ remote::PatchThingResponse::Status404(_) => {
+        other @ remote::patch_thing::Response::Status404(_) => {
             panic!("unexpected response: {other:?}")
         }
     }
@@ -96,7 +96,7 @@ async fn client_decodes_problem_json_responses() {
     };
     let response = client
         .patch_thing(
-            remote::PatchThingRequest {
+            remote::patch_thing::Request {
                 id: 2,
                 body: remote::ThingPatch { name: None },
             },
@@ -105,10 +105,10 @@ async fn client_decodes_problem_json_responses() {
         .await
         .unwrap();
     match response {
-        remote::PatchThingResponse::Status404(problem) => {
+        remote::patch_thing::Response::Status404(problem) => {
             assert_eq!(problem.title, "no such thing");
         }
-        other @ remote::PatchThingResponse::Status200(_) => {
+        other @ remote::patch_thing::Response::Status200(_) => {
             panic!("unexpected response: {other:?}")
         }
     }

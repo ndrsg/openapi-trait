@@ -16,7 +16,7 @@ method per operation, plus a `router()` method that wires it to an
 
 Each method receives, in order:
 
-1. **`req`**, the operation's `{OperationId}Request` struct. It holds path,
+1. **`req`**, the operation's `{operation}::Request` struct. It holds path,
    query and header parameters as typed fields, and the request body as
    `body`.
 2. **`auth`**, only if the operation is secured. See [Security](security.md).
@@ -24,7 +24,7 @@ Each method receives, in order:
 4. **`headers`**, the raw `axum::http::HeaderMap`, for anything the spec
    doesn't model.
 
-It returns `Result<{OperationId}Response, Self::Error>`. The response enum has
+It returns `Result<{operation}::Response, Self::Error>`. The response enum has
 one variant per declared status code (`Status200(Pet)`, `Status404`, …), and
 each variant implements `IntoResponse` with the matching status and body.
 
@@ -75,7 +75,7 @@ impl axum::response::IntoResponse for AppError {
 ```
 
 An `Err` is for failures *outside* the contract. Responses the spec declares,
-such as `404`, belong in the `Ok` variant (`Ok(GetPetResponse::Status404)`).
+such as `404`, belong in the `Ok` variant (`Ok(get_pet::Response::Status404)`).
 
 ## Binary bodies
 

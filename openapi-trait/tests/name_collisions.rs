@@ -1,7 +1,10 @@
-//! Regression tests for `KNOWN_ISSUES.md` C5: a type synthesized for an inline
-//! schema used to reuse a name that a component schema or an operation type
-//! already had ("the name `PersonAddress` is defined multiple times"). It now
-//! gets a numeric suffix instead.
+//! Regression tests for `KNOWN_ISSUES.md` C5 and the `{Op}Request` clash:
+//! generated types used to share one namespace, so a `CreateThingRequest`
+//! schema next to operation `createThing`, or an inline `Person.address` next
+//! to a `PersonAddress` schema, defined a name twice.
+//!
+//! Operation types now live in a module per operation, and a type synthesized
+//! for an inline schema gets a numeric suffix when its name is taken.
 
 #[openapi_trait::axum("assets/testdata/name_collisions.openapi.yaml")]
 pub mod example {}
@@ -10,18 +13,35 @@ pub mod example {}
 pub mod client {}
 
 use example::{
-    Bag, BagAdditionalProperties, BagAdditionalProperties2, Colors, Colors2, CreateThing,
-    CreateThingKindPath, CreateThingKindPath2, CreateThingRequest, CreateThingRequest2, Person,
-    PersonAddress, PersonAddress2,
+    create_thing, Bag, BagAdditionalProperties, BagAdditionalProperties2, Colors, Colors2,
+    CreateThingKindPath, CreateThingRequest, Person, PersonAddress, PersonAddress2,
 };
 
 #[test]
+fn schemas_can_share_names_with_operation_types() {
+    // The operation's request struct holds the schema of the same name.
+    let request = create_thing::Request {
+        kind: create_thing::KindPath::B,
+        body: CreateThingRequest { name: "n".into() },
+    };
+    assert_eq!(request.kind.to_string(), "b");
+    let _: CreateThingKindPath = serde_json::from_str(r#"{"w": "w"}"#).unwrap();
+
+    // Inside the module, `Response` and `Request` schemas aren't shadowed by
+    // the operation's own `Response` and `Request`.
+    let ok = create_thing::Response::Status200(example::Response { id: Some(1) });
+    let rejected = create_thing::Response::Status400(example::Request {
+        reason: Some("no".into()),
+    });
+    assert!(matches!(ok, create_thing::Response::Status200(_)));
+    assert!(matches!(rejected, create_thing::Response::Status400(_)));
+}
+
+#[test]
 fn inline_property_types_get_a_suffix() {
-    // The component keeps its name and fields.
     let component = PersonAddress {
         x: Some("x".into()),
     };
-    // The inline type gets the suffix and keeps its own fields.
     let person = Person {
         address: Some(PersonAddress2 {
             y: Some("y".into()),
@@ -35,23 +55,6 @@ fn inline_property_types_get_a_suffix() {
         serde_json::to_value(&component).unwrap(),
         serde_json::json!({"x": "x"})
     );
-}
-
-#[test]
-fn inline_types_avoid_operation_type_names() {
-    let body = CreateThing {
-        request: Some(CreateThingRequest2 {
-            z: Some("z".into()),
-        }),
-    };
-    // The operation's request struct is untouched.
-    let request = CreateThingRequest {
-        kind: CreateThingKindPath2::B,
-        body,
-    };
-    assert_eq!(request.kind.to_string(), "b");
-    let component: CreateThingKindPath = serde_json::from_str(r#"{"w": "w"}"#).unwrap();
-    assert_eq!(component.w.as_deref(), Some("w"));
 }
 
 #[test]
@@ -72,8 +75,11 @@ fn array_alias_item_enum_gets_a_suffix() {
 
 #[test]
 fn client_uses_the_same_names() {
+    let _ = client::create_thing::Request {
+        kind: client::create_thing::KindPath::A,
+        body: client::CreateThingRequest { name: "n".into() },
+    };
     let _ = client::Person {
         address: Some(client::PersonAddress2 { y: None }),
     };
-    let _ = client::CreateThingKindPath2::A;
 }

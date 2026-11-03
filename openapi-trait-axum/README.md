@@ -17,8 +17,9 @@ Given an annotated `mod`, the macro reads an OpenAPI document at compile time
 and replaces the module contents with:
 
 - `serde`-derived Rust structs for `components/schemas`
-- `{OperationId}Request` structs for path, query, header, and body inputs
-- `{OperationId}Response` enums implementing `axum::response::IntoResponse`
+- A module per operation (`get_pet`) with a `Request` struct for path, query,
+  header, and body inputs and a `Response` enum implementing
+  `axum::response::IntoResponse`
 - A `{ModName}Api<S = ()>` trait with one method per `operationId`
 - A `router()` helper that builds an `axum::Router<S>` for the implementation
 

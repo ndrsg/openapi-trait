@@ -65,13 +65,13 @@ impl axum_default::petstore::PetstoreApi for MockPetstore {
 #[test]
 fn included_axum_module_is_usable() {
     let _router = MockPetstore.router();
-    let req = axum_default::petstore::GetPetByIdRequest { pet_id: 42 };
+    let req = axum_default::petstore::get_pet_by_id::Request { pet_id: 42 };
     assert_eq!(req.pet_id, 42);
 }
 
 #[test]
 fn included_client_module_is_usable() {
-    let req = client_dir::petstore::GetPetByIdRequest { pet_id: 7 };
+    let req = client_dir::petstore::get_pet_by_id::Request { pet_id: 7 };
     assert_eq!(req.pet_id, 7);
 }
 

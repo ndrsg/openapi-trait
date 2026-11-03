@@ -177,19 +177,21 @@ pub fn generate_scheme_types(schemes: &[SchemeInfo]) -> TokenStream {
     quote! { #(#items)* }
 }
 
-/// Generate one `{Op}Auth` enum per operation that has more than one alternative.
+/// Generate the `Auth` enum of an operation that accepts more than one
+/// scheme. It is emitted into the operation's module, so the scheme types are
+/// referenced through [`super::ctx::ROOT_MODULE`].
 #[must_use]
-pub fn generate_op_auth_enum(op_id: &str, alternatives: &[&SchemeInfo]) -> Option<TokenStream> {
+pub fn generate_op_auth_enum(alternatives: &[&SchemeInfo]) -> Option<TokenStream> {
     if alternatives.len() < 2 {
         return None;
     }
-    let ident = auth_enum_ident(op_id);
+    let ident = format_ident!("{}", super::operations::AUTH_TYPE);
+    let root = format_ident!("{}", super::ctx::ROOT_MODULE);
     let variants: Vec<TokenStream> = alternatives
         .iter()
         .map(|s| {
             let variant = &s.ident;
-            let ty = &s.ident;
-            quote! { #variant(#ty), }
+            quote! { #variant(#root::#variant), }
         })
         .collect();
     Some(quote! {
@@ -198,27 +200,6 @@ pub fn generate_op_auth_enum(op_id: &str, alternatives: &[&SchemeInfo]) -> Optio
             #(#variants)*
         }
     })
-}
-
-/// Pascal-cased ident for an operation's auth enum.
-#[must_use]
-pub fn auth_enum_ident(op_id: &str) -> syn::Ident {
-    format_ident!("{}Auth", op_id.to_pascal_case())
-}
-
-/// Compute the Rust type used as the trait method's `auth` parameter.
-///
-/// Returns `None` when the operation has no security requirement.
-#[must_use]
-pub fn auth_param_type(op_id: &str, op_security: &OpSecurity) -> Option<TokenStream> {
-    if op_security.alternatives.is_empty() {
-        return None;
-    }
-    if op_security.alternatives.len() == 1 {
-        return Some(TokenStream::new()); // sentinel: caller looks up the scheme ident
-    }
-    let ident = auth_enum_ident(op_id);
-    Some(quote! { #ident })
 }
 
 /// Returns the scheme infos referenced by an op's alternatives, in declaration order.

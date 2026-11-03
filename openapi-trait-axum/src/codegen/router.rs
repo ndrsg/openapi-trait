@@ -6,7 +6,7 @@ use openapi_trait_shared::codegen::operations::{
     BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo, ResponseHeaderInfo, ResponseStatus,
 };
 use openapi_trait_shared::codegen::security::{
-    auth_enum_ident, resolve_alternatives, ApiKeyIn, SchemeInfo, SchemeKind,
+    resolve_alternatives, ApiKeyIn, SchemeInfo, SchemeKind,
 };
 
 /// Generate `IntoResponse` impls and the private `make_router` free function.
@@ -167,7 +167,7 @@ fn generate_auth_helpers(schemes: &[SchemeInfo]) -> TokenStream {
 
 /// Generate `IntoResponse` impl for a single operation's response enum.
 fn generate_into_response_impl(op: &OperationInfo) -> TokenStream {
-    let resp_ident = format_ident!("{}Response", op.operation_id.to_pascal_case());
+    let resp_ident = op.response_path();
 
     let arms: Vec<TokenStream> = op
         .responses
@@ -348,7 +348,7 @@ fn status_code_expr(n: u16) -> TokenStream {
 /// Generate the route call for one operation.
 fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let method_ident = &op.method_ident;
-    let req_ident = format_ident!("{}Request", op.operation_id.to_pascal_case());
+    let req_ident = op.request_path();
     let path = &op.path;
     let routing_method = format_ident!("{}", op.method);
 
@@ -481,7 +481,7 @@ fn build_auth_extractor(op: &OperationInfo, alts: &[&SchemeInfo]) -> (TokenStrea
     }
 
     // Multiple alternatives — try each in order; wrap in op's auth enum.
-    let enum_ident = auth_enum_ident(&op.operation_id);
+    let enum_ident = op.auth_path();
     let try_arms: Vec<TokenStream> = alts
         .iter()
         .map(|s| {

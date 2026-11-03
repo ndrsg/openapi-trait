@@ -21,12 +21,12 @@ impl server::ServerApi for Server {
 
     async fn filter_colors(
         &self,
-        req: server::FilterColorsRequest,
+        req: server::filter_colors::Request,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<server::FilterColorsResponse, Self::Error> {
-        let colors: Vec<server::FilterColorsColorQuery> = req.color;
-        let shades: Vec<server::FilterColorsShadeQuery> = req.shade.unwrap_or_default();
+    ) -> Result<server::filter_colors::Response, Self::Error> {
+        let colors: Vec<server::filter_colors::ColorQuery> = req.color;
+        let shades: Vec<server::filter_colors::ShadeQuery> = req.shade.unwrap_or_default();
         let mut out: Vec<String> = colors
             .iter()
             .map(|c| {
@@ -38,7 +38,7 @@ impl server::ServerApi for Server {
             })
             .collect();
         out.extend(shades.iter().map(|s| format!("{s:?}")));
-        Ok(server::FilterColorsResponse::Status200(out))
+        Ok(server::filter_colors::Response::Status200(out))
     }
 }
 
@@ -67,14 +67,14 @@ async fn enum_array_query_params_round_trip() {
         http: reqwest::Client::new(),
         endpoint: spawn_server().await,
     };
-    let remote::FilterColorsResponse::Status200(parsed) = client
+    let remote::filter_colors::Response::Status200(parsed) = client
         .filter_colors(
-            remote::FilterColorsRequest {
+            remote::filter_colors::Request {
                 color: vec![
-                    remote::FilterColorsColorQuery::Red,
-                    remote::FilterColorsColorQuery::DarkGreen,
+                    remote::filter_colors::ColorQuery::Red,
+                    remote::filter_colors::ColorQuery::DarkGreen,
                 ],
-                shade: Some(vec![remote::FilterColorsShadeQuery::Dark]),
+                shade: Some(vec![remote::filter_colors::ShadeQuery::Dark]),
             },
             None,
         )

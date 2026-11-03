@@ -2,17 +2,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use heck::ToPascalCase;
-use openapiv3::{OpenAPI, PathItem, ReferenceOr, Schema, SchemaKind, Type};
+use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::quote;
 
 /// State shared by every codegen stage for one `OpenAPI` document.
 ///
-/// Create one per macro expansion with [`CodegenCtx::new`], pass it to
+/// Create one per macro expansion with [`CodegenCtx::new`] and pass it to
 /// [`super::schemas::generate_schemas`] and
-/// [`super::operations::collect_operations`], and emit
-/// [`CodegenCtx::take_inline_types`] alongside the generated items.
+/// [`super::operations::collect_operations`].
 #[derive(Debug, Default)]
 pub struct CodegenCtx {
     /// Top-level types synthesized from inline schemas (inline objects,
@@ -35,9 +33,36 @@ pub struct CodegenCtx {
     /// Whether the current position is below an object property of `owner`
     /// (a struct field), rather than directly in a composition.
     in_property: bool,
-    /// Type identifiers already taken in the generated module (see
+    /// Type identifiers already taken in the module being generated (see
     /// [`CodegenCtx::reserve_type_name`]).
     type_names: BTreeSet<String>,
+    /// The operation module being generated (see
+    /// [`CodegenCtx::with_operation`]), or `None` at the macro module's top
+    /// level.
+    op_module: Option<syn::Ident>,
+}
+
+/// Name of the hidden module that re-exports the macro module's top level
+/// (see [`root_module`]).
+pub const ROOT_MODULE: &str = "__root";
+
+/// The hidden `__root` module, which re-exports every public item of the
+/// macro module.
+///
+/// Type paths that are used both at the top level and inside an operation
+/// module are written through it (`__root::Pet`, `__root::create_pet::Body`),
+/// so they resolve the same way in both places, and a schema named like an
+/// operation type (`Request`) can't be shadowed by it.
+#[must_use]
+pub fn root_module() -> TokenStream {
+    let root = quote::format_ident!("{ROOT_MODULE}");
+    quote! {
+        #[doc(hidden)]
+        pub mod #root {
+            #[allow(unused_imports)]
+            pub use super::*;
+        }
+    }
 }
 
 impl CodegenCtx {
@@ -64,7 +89,44 @@ impl CodegenCtx {
             owner: None,
             in_property: false,
             type_names: fixed_type_names(openapi),
+            op_module: None,
         }
+    }
+
+    /// Run `f` while collecting the types of the operation whose module is
+    /// `module`, and return its result with the types synthesized meanwhile.
+    ///
+    /// Inside, the operation module has its own type-name registry, starting
+    /// with `reserved`, and type paths are qualified through [`ROOT_MODULE`]
+    /// (see [`CodegenCtx::ref_type`] and [`CodegenCtx::local_type`]).
+    pub fn with_operation<R>(
+        &mut self,
+        module: &syn::Ident,
+        reserved: impl IntoIterator<Item = String>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> (R, Vec<TokenStream>) {
+        let prev_names = std::mem::replace(&mut self.type_names, reserved.into_iter().collect());
+        let prev_types = std::mem::take(&mut self.inline_types);
+        let prev_module = self.op_module.replace(module.clone());
+        let out = f(self);
+        self.type_names = prev_names;
+        self.op_module = prev_module;
+        let types = std::mem::replace(&mut self.inline_types, prev_types);
+        (out, types)
+    }
+
+    /// The path to a type synthesized at the current position: the bare
+    /// `ident` at the top level, `__root::{module}::{ident}` inside an
+    /// operation.
+    #[must_use]
+    pub fn local_type(&self, ident: &syn::Ident) -> TokenStream {
+        self.op_module.as_ref().map_or_else(
+            || quote! { #ident },
+            |module| {
+                let root = quote::format_ident!("{ROOT_MODULE}");
+                quote! { #root::#module::#ident }
+            },
+        )
     }
 
     /// Reserve a type name for a type synthesized from `candidate`, such as
@@ -144,10 +206,15 @@ impl CodegenCtx {
     }
 
     /// The Rust type for a by-value `$ref` at the current position: the
-    /// referenced type, boxed when it closes a cycle.
+    /// referenced type, boxed when it closes a cycle, and qualified through
+    /// [`ROOT_MODULE`] inside an operation.
     #[must_use]
     pub fn ref_type(&self, reference: &str) -> TokenStream {
-        let ident = super::types::ref_to_ident(reference);
+        let mut ident = super::types::ref_to_ident(reference);
+        if self.op_module.is_some() {
+            let root = quote::format_ident!("{ROOT_MODULE}");
+            ident = quote! { #root::#ident };
+        }
         if self.needs_box(reference) {
             quote! { ::std::boxed::Box<#ident> }
         } else {
@@ -156,40 +223,19 @@ impl CodegenCtx {
     }
 }
 
-/// The type identifiers the generated module defines under fixed names:
-/// component schemas, security schemes, and the per-operation
-/// `{Op}Request`, `{Op}Response`, `{Op}Auth` and `{Op}Status{code}` types.
+/// The type identifiers the macro module defines under fixed names:
+/// component schemas and security schemes. Operation types live in their
+/// own modules (see [`CodegenCtx::with_operation`]).
 fn fixed_type_names(openapi: &OpenAPI) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
-    if let Some(components) = &openapi.components {
-        for name in components
-            .schemas
-            .keys()
-            .chain(components.security_schemes.keys())
-        {
-            names.insert(super::idents::schema_type_ident(name).to_string());
-        }
-    }
-    let operations = openapi
-        .paths
-        .iter()
-        .filter_map(|(_, item)| item.as_item())
-        .flat_map(PathItem::iter);
-    for (_, op) in operations {
-        let Some(op_id) = &op.operation_id else {
-            continue;
-        };
-        let base = op_id.to_pascal_case();
-        for suffix in ["Request", "Response", "Auth"] {
-            names.insert(format!("{base}{suffix}"));
-        }
-        for status in op.responses.responses.keys() {
-            if let openapiv3::StatusCode::Code(n) = status {
-                names.insert(format!("{base}Status{n}"));
-            }
-        }
-    }
-    names
+    let Some(components) = &openapi.components else {
+        return BTreeSet::new();
+    };
+    components
+        .schemas
+        .keys()
+        .chain(components.security_schemes.keys())
+        .map(|name| super::idents::schema_type_ident(name).to_string())
+        .collect()
 }
 
 /// The component name a `$ref` points at: `#/components/schemas/Foo` → `Foo`.

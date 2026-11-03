@@ -9,14 +9,12 @@ use quote::quote;
 
 use api_trait::generate_trait;
 use openapi_trait_shared::codegen::{
-    ctx::CodegenCtx,
+    ctx::{root_module, CodegenCtx},
     operations::{
         collect_operations, generate_operation_errors, generate_operation_types, BinaryBodyTypes,
     },
     schemas::generate_schemas,
-    security::{
-        collect_schemes, generate_op_auth_enum, generate_scheme_types, resolve_alternatives,
-    },
+    security::{collect_schemes, generate_scheme_types},
 };
 use router::generate_router;
 
@@ -26,8 +24,6 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
     let mut ctx = CodegenCtx::new(openapi);
     let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes, &mut ctx);
-    // Types synthesized for inline request and response bodies.
-    let op_inline_types = ctx.take_inline_types();
     diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(
@@ -36,16 +32,10 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
             request: quote!(::axum::body::Body),
             response: quote!(::axum::body::Body),
         },
+        &auth_schemes,
     );
 
     let auth_types = generate_scheme_types(&auth_schemes);
-    let op_auth_enums: Vec<TokenStream> = ops
-        .iter()
-        .filter_map(|op| {
-            let alts = resolve_alternatives(&op.auth, &auth_schemes);
-            generate_op_auth_enum(&op.operation_id, &alts)
-        })
-        .collect();
 
     let unsupported_and = openapi_trait_shared::codegen::security::generate_unsupported_and_errors(
         &ops.iter()
@@ -57,14 +47,15 @@ pub fn generate_axum(mod_ident: &syn::Ident, openapi: &OpenAPI) -> TokenStream {
     let api_trait = generate_trait(mod_ident, &ops, &auth_schemes);
     let router = generate_router(mod_ident, &ops, &auth_schemes);
 
+    let root = root_module();
+
     quote! {
         use super::*;
+        #root
         #op_errors
         #unsupported_and
         #schema_types
         #auth_types
-        #(#op_auth_enums)*
-        #(#op_inline_types)*
         #op_types
         #api_trait
         #router

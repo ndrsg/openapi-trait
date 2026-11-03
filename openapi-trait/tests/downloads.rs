@@ -49,37 +49,37 @@ impl downloads_server::DownloadsServerApi<AppState> for MockDownloads {
 
     async fn download_file(
         &self,
-        req: downloads_server::DownloadFileRequest,
+        req: downloads_server::download_file::Request,
         state: axum::extract::State<AppState>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<downloads_server::DownloadFileResponse, Self::Error> {
+    ) -> Result<downloads_server::download_file::Response, Self::Error> {
         if req.id == "found" {
             let body = file_to_body(&state.download_source)
                 .await
                 .expect("download source readable");
-            Ok(downloads_server::DownloadFileResponse::Status200(
-                downloads_server::DownloadFileStatus200 {
+            Ok(downloads_server::download_file::Response::Status200(
+                downloads_server::download_file::Status200 {
                     body,
                     content_disposition: Some("attachment; filename=\"report.pdf\"".to_string()),
                     e_tag: Some("\"abc123\"".to_string()),
                 },
             ))
         } else {
-            Ok(downloads_server::DownloadFileResponse::Status404)
+            Ok(downloads_server::download_file::Response::Status404)
         }
     }
 
     async fn upload_file(
         &self,
-        req: downloads_server::UploadFileRequest,
+        req: downloads_server::upload_file::Request,
         state: axum::extract::State<AppState>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<downloads_server::UploadFileResponse, Self::Error> {
+    ) -> Result<downloads_server::upload_file::Response, Self::Error> {
         let nbytes = stream_body_to_file(req.body, &state.upload_dest)
             .await
             .expect("upload destination writable");
-        Ok(downloads_server::UploadFileResponse::Status201(
-            downloads_server::UploadFileStatus201Body {
+        Ok(downloads_server::upload_file::Response::Status201(
+            downloads_server::upload_file::Status201Body {
                 id: format!("uploaded-{nbytes}"),
             },
         ))
@@ -190,7 +190,7 @@ mod client_tests {
 
         let response = client
             .download_file(
-                downloads::DownloadFileRequest {
+                downloads::download_file::Request {
                     id: "found".to_string(),
                 },
                 None,
@@ -199,7 +199,7 @@ mod client_tests {
             .unwrap();
 
         match response {
-            downloads::DownloadFileResponse::Status200(payload) => {
+            downloads::download_file::Response::Status200(payload) => {
                 stream_to_file(payload.body, &output)
                     .await
                     .expect("write streamed download");
@@ -210,7 +210,7 @@ mod client_tests {
                 );
                 assert_eq!(payload.e_tag.as_deref(), Some("\"abc123\""));
             }
-            downloads::DownloadFileResponse::Status404 => panic!("expected 200 response"),
+            downloads::download_file::Response::Status404 => panic!("expected 200 response"),
         }
     }
 
@@ -236,8 +236,8 @@ mod client_tests {
         let body =
             openapi_trait::reqwest::Body::wrap_stream(tokio_util::io::ReaderStream::new(file));
 
-        let downloads::UploadFileResponse::Status201(resp) = client
-            .upload_file(downloads::UploadFileRequest { body }, None)
+        let downloads::upload_file::Response::Status201(resp) = client
+            .upload_file(downloads::upload_file::Request { body }, None)
             .await
             .unwrap();
 

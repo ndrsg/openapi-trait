@@ -15,18 +15,18 @@ impl pets::PetsClient for FakePets {
 
     async fn list_pets(
         &self,
-        _req: pets::ListPetsRequest,
+        _req: pets::list_pets::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<pets::ListPetsResponse, Self::Error> {
-        Ok(pets::ListPetsResponse::Status200(vec![]))
+    ) -> Result<pets::list_pets::Response, Self::Error> {
+        Ok(pets::list_pets::Response::Status200(vec![]))
     }
 
     async fn create_pet(
         &self,
-        req: pets::CreatePetRequest,
+        req: pets::create_pet::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<pets::CreatePetResponse, Self::Error> {
-        Ok(pets::CreatePetResponse::Status201(pets::Pet {
+    ) -> Result<pets::create_pet::Response, Self::Error> {
+        Ok(pets::create_pet::Response::Status201(pets::Pet {
             id: 1,
             name: req.body.name,
             status: req.body.status,
@@ -35,10 +35,10 @@ impl pets::PetsClient for FakePets {
 
     async fn get_pet(
         &self,
-        _req: pets::GetPetRequest,
+        _req: pets::get_pet::Request,
         _options: Option<openapi_trait::RequestOptions>,
-    ) -> Result<pets::GetPetResponse, Self::Error> {
-        Ok(pets::GetPetResponse::Status404)
+    ) -> Result<pets::get_pet::Response, Self::Error> {
+        Ok(pets::get_pet::Response::Status404)
     }
 }
 // ANCHOR_END: impl
@@ -46,8 +46,11 @@ impl pets::PetsClient for FakePets {
 // ANCHOR: generic
 /// Code written against the trait works with any implementation.
 async fn pet_name<C: pets::PetsClient>(client: &C, pet_id: i64) -> Option<String> {
-    match client.get_pet(pets::GetPetRequest { pet_id }, None).await {
-        Ok(pets::GetPetResponse::Status200(pet)) => Some(pet.name),
+    match client
+        .get_pet(pets::get_pet::Request { pet_id }, None)
+        .await
+    {
+        Ok(pets::get_pet::Response::Status200(pet)) => Some(pet.name),
         _ => None,
     }
 }

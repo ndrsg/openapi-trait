@@ -28,13 +28,13 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore_server::GetPetByIdRequest,
-        _auth: petstore_server::GetPetByIdAuth,
+        req: petstore_server::get_pet_by_id::Request,
+        _auth: petstore_server::get_pet_by_id::Auth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
+    ) -> Result<petstore_server::get_pet_by_id::Response, Self::Error> {
         if req.pet_id == 42 {
-            Ok(petstore_server::GetPetByIdResponse::Status200(
+            Ok(petstore_server::get_pet_by_id::Response::Status200(
                 petstore_server::Pet {
                     id: Some(42),
                     name: "doggie".into(),
@@ -45,42 +45,42 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
                 },
             ))
         } else {
-            Ok(petstore_server::GetPetByIdResponse::Status404)
+            Ok(petstore_server::get_pet_by_id::Response::Status404)
         }
     }
 
     async fn find_pets_by_status(
         &self,
-        req: petstore_server::FindPetsByStatusRequest,
+        req: petstore_server::find_pets_by_status::Request,
         _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::FindPetsByStatusResponse, Self::Error> {
+    ) -> Result<petstore_server::find_pets_by_status::Response, Self::Error> {
         match req.status {
-            petstore_server::FindPetsByStatusStatusQuery::Available => {
-                Ok(petstore_server::FindPetsByStatusResponse::Status200(vec![
-                    petstore_server::Pet {
+            petstore_server::find_pets_by_status::StatusQuery::Available => {
+                Ok(petstore_server::find_pets_by_status::Response::Status200(
+                    vec![petstore_server::Pet {
                         id: Some(7),
                         name: "available".into(),
                         photo_urls: vec![],
                         category: None,
                         tags: None,
                         status: Some(petstore_server::PetStatus::Available),
-                    },
-                ]))
+                    }],
+                ))
             }
-            _ => Ok(petstore_server::FindPetsByStatusResponse::Status400),
+            _ => Ok(petstore_server::find_pets_by_status::Response::Status400),
         }
     }
 
     async fn add_pet(
         &self,
-        req: petstore_server::AddPetRequest,
+        req: petstore_server::add_pet::Request,
         _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::AddPetResponse, Self::Error> {
-        Ok(petstore_server::AddPetResponse::Status200(req.body))
+    ) -> Result<petstore_server::add_pet::Response, Self::Error> {
+        Ok(petstore_server::add_pet::Response::Status200(req.body))
     }
 }
 
@@ -111,12 +111,12 @@ async fn generated_reqwest_client_handles_path_params() {
     };
 
     let response = client
-        .get_pet_by_id(petstore::GetPetByIdRequest { pet_id: 42 }, None)
+        .get_pet_by_id(petstore::get_pet_by_id::Request { pet_id: 42 }, None)
         .await
         .unwrap();
 
     match response {
-        petstore::GetPetByIdResponse::Status200(pet) => assert_eq!(pet.id, Some(42)),
+        petstore::get_pet_by_id::Response::Status200(pet) => assert_eq!(pet.id, Some(42)),
         _ => panic!("expected 200 response"),
     }
 }
@@ -137,8 +137,8 @@ async fn generated_reqwest_client_handles_query_params() {
 
     let response = client
         .find_pets_by_status(
-            petstore::FindPetsByStatusRequest {
-                status: petstore::FindPetsByStatusStatusQuery::Available,
+            petstore::find_pets_by_status::Request {
+                status: petstore::find_pets_by_status::StatusQuery::Available,
             },
             None,
         )
@@ -146,7 +146,7 @@ async fn generated_reqwest_client_handles_query_params() {
         .unwrap();
 
     match response {
-        petstore::FindPetsByStatusResponse::Status200(pets) => assert_eq!(pets.len(), 1),
+        petstore::find_pets_by_status::Response::Status200(pets) => assert_eq!(pets.len(), 1),
         _ => panic!("expected 200 response"),
     }
 }
@@ -167,7 +167,7 @@ async fn generated_reqwest_client_handles_json_bodies() {
 
     let response = client
         .add_pet(
-            petstore::AddPetRequest {
+            petstore::add_pet::Request {
                 body: petstore::Pet {
                     id: Some(8),
                     name: "from-client".into(),
@@ -183,7 +183,7 @@ async fn generated_reqwest_client_handles_json_bodies() {
         .unwrap();
 
     match response {
-        petstore::AddPetResponse::Status200(pet) => assert_eq!(pet.name, "from-client"),
+        petstore::add_pet::Response::Status200(pet) => assert_eq!(pet.name, "from-client"),
         _ => panic!("expected 200 response"),
     }
 }
@@ -200,11 +200,11 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore_server::GetPetByIdRequest,
-        _auth: petstore_server::GetPetByIdAuth,
+        req: petstore_server::get_pet_by_id::Request,
+        _auth: petstore_server::get_pet_by_id::Auth,
         _state: axum::extract::State<()>,
         headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
+    ) -> Result<petstore_server::get_pet_by_id::Response, Self::Error> {
         {
             let mut received = self.received.lock().unwrap();
             for (name, value) in &headers {
@@ -214,7 +214,7 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
                 ));
             }
         }
-        Ok(petstore_server::GetPetByIdResponse::Status200(
+        Ok(petstore_server::get_pet_by_id::Response::Status200(
             petstore_server::Pet {
                 id: Some(req.pet_id),
                 name: "doggie".into(),
@@ -228,22 +228,22 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
 
     async fn find_pets_by_status(
         &self,
-        _req: petstore_server::FindPetsByStatusRequest,
+        _req: petstore_server::find_pets_by_status::Request,
         _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::FindPetsByStatusResponse, Self::Error> {
-        Ok(petstore_server::FindPetsByStatusResponse::Status400)
+    ) -> Result<petstore_server::find_pets_by_status::Response, Self::Error> {
+        Ok(petstore_server::find_pets_by_status::Response::Status400)
     }
 
     async fn add_pet(
         &self,
-        req: petstore_server::AddPetRequest,
+        req: petstore_server::add_pet::Request,
         _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
-    ) -> Result<petstore_server::AddPetResponse, Self::Error> {
-        Ok(petstore_server::AddPetResponse::Status200(req.body))
+    ) -> Result<petstore_server::add_pet::Response, Self::Error> {
+        Ok(petstore_server::add_pet::Response::Status200(req.body))
     }
 }
 
@@ -272,7 +272,7 @@ async fn generated_reqwest_client_applies_per_request_headers_and_auth() {
 
     client
         .get_pet_by_id(
-            petstore::GetPetByIdRequest { pet_id: 42 },
+            petstore::get_pet_by_id::Request { pet_id: 42 },
             Some(
                 openapi_trait::RequestOptions::new()
                     .bearer_auth("token-123")
