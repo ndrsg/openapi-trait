@@ -1,4 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md C6 (`nullable: true`).
+# Regression fixture for KNOWN_ISSUES.md C6 (`nullable: true`) and C7
+# (optional fields serialized as `null`).
 openapi: 3.0.1
 info:
   title: nullable
@@ -49,3 +50,10 @@ components:
           allOf:
             - $ref: '#/components/schemas/Owner'
         nickname: { type: string, nullable: true }
+        note: { type: string }
+    TaggedOwner:
+      allOf:
+        - $ref: '#/components/schemas/Owner'
+        - type: object
+          properties:
+            tag: { type: string }
