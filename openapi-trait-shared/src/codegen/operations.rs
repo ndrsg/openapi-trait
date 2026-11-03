@@ -1081,16 +1081,20 @@ pub fn generate_operation_errors(errors: &[String]) -> TokenStream {
     quote! { #(#msgs)* }
 }
 
-/// Generate query-param enum types + request structs + response enums for all operations.
+/// Generate the module of every operation, holding its types.
+///
+/// `backend_items` adds backend-specific items to each operation's module,
+/// such as the server's `Context`.
 #[must_use]
 pub fn generate_operation_types(
     ops: &[OperationInfo],
     binary: &BinaryBodyTypes,
     schemes: &[SchemeInfo],
+    backend_items: &dyn Fn(&OperationInfo) -> TokenStream,
 ) -> TokenStream {
     let items: Vec<TokenStream> = ops
         .iter()
-        .map(|op| generate_single_operation_types(op, binary, schemes))
+        .map(|op| generate_single_operation_types(op, binary, schemes, &backend_items(op)))
         .collect();
     quote! { #(#items)* }
 }
@@ -1104,6 +1108,7 @@ fn generate_single_operation_types(
     op: &OperationInfo,
     binary: &BinaryBodyTypes,
     schemes: &[SchemeInfo],
+    backend_items: &TokenStream,
 ) -> TokenStream {
     let module = &op.module_ident;
     let root = format_ident!("{}", super::ctx::ROOT_MODULE);
@@ -1124,6 +1129,7 @@ fn generate_single_operation_types(
             #auth_enum
             #request_struct
             #response_enum
+            #backend_items
         }
     }
 }

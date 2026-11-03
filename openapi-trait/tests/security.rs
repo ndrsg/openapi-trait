@@ -18,11 +18,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_me(
         &self,
-        _req: sec_axum::get_me::Request,
-        auth: sec_axum::ApiKeyAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_me::Context,
     ) -> Result<sec_axum::get_me::Response, Self::Error> {
+        let sec_axum::get_me::Context { auth, .. } = ctx;
         Ok(sec_axum::get_me::Response::Status200(sec_axum::OkPayload {
             ok: auth.0 == "k",
         }))
@@ -30,11 +28,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_admin(
         &self,
-        _req: sec_axum::get_admin::Request,
-        auth: sec_axum::BearerAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_admin::Context,
     ) -> Result<sec_axum::get_admin::Response, Self::Error> {
+        let sec_axum::get_admin::Context { auth, .. } = ctx;
         Ok(sec_axum::get_admin::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
@@ -42,11 +38,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_flex(
         &self,
-        _req: sec_axum::get_flex::Request,
-        auth: sec_axum::get_flex::Auth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_flex::Context,
     ) -> Result<sec_axum::get_flex::Response, Self::Error> {
+        let sec_axum::get_flex::Context { auth, .. } = ctx;
         let kind = match auth {
             sec_axum::get_flex::Auth::BearerAuth(b) => format!("bearer:{}", b.0),
             sec_axum::get_flex::Auth::BasicAuth(b) => {
@@ -60,9 +54,7 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_public(
         &self,
-        _req: sec_axum::get_public::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        _ctx: sec_axum::get_public::Context,
     ) -> Result<sec_axum::get_public::Response, Self::Error> {
         Ok(sec_axum::get_public::Response::Status200(
             sec_axum::OkPayload { ok: true },
@@ -71,11 +63,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_cookied(
         &self,
-        _req: sec_axum::get_cookied::Request,
-        auth: sec_axum::SessionCookie,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_cookied::Context,
     ) -> Result<sec_axum::get_cookied::Response, Self::Error> {
+        let sec_axum::get_cookied::Context { auth, .. } = ctx;
         Ok(sec_axum::get_cookied::Response::Status200(
             sec_axum::SessionPayload { session: auth.0 },
         ))
@@ -83,11 +73,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_oauth(
         &self,
-        _req: sec_axum::get_oauth::Request,
-        auth: sec_axum::Oauth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_oauth::Context,
     ) -> Result<sec_axum::get_oauth::Response, Self::Error> {
+        let sec_axum::get_oauth::Context { auth, .. } = ctx;
         Ok(sec_axum::get_oauth::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
@@ -95,11 +83,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_oidc(
         &self,
-        _req: sec_axum::get_oidc::Request,
-        auth: sec_axum::Oidc,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_oidc::Context,
     ) -> Result<sec_axum::get_oidc::Response, Self::Error> {
+        let sec_axum::get_oidc::Context { auth, .. } = ctx;
         Ok(sec_axum::get_oidc::Response::Status200(
             sec_axum::TokenPayload { token: auth.0 },
         ))
@@ -107,11 +93,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_maybe(
         &self,
-        _req: sec_axum::get_maybe::Request,
-        auth: Option<sec_axum::BearerAuth>,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_maybe::Context,
     ) -> Result<sec_axum::get_maybe::Response, Self::Error> {
+        let sec_axum::get_maybe::Context { auth, .. } = ctx;
         let kind = auth.map_or_else(|| "anonymous".to_owned(), |b| format!("bearer:{}", b.0));
         Ok(sec_axum::get_maybe::Response::Status200(
             sec_axum::KindPayload { kind },
@@ -120,11 +104,9 @@ impl sec_axum::SecAxumApi for MockServer {
 
     async fn get_maybe_flex(
         &self,
-        _req: sec_axum::get_maybe_flex::Request,
-        auth: Option<sec_axum::get_maybe_flex::Auth>,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sec_axum::get_maybe_flex::Context,
     ) -> Result<sec_axum::get_maybe_flex::Response, Self::Error> {
+        let sec_axum::get_maybe_flex::Context { auth, .. } = ctx;
         let kind = match auth {
             None => "anonymous".to_owned(),
             Some(sec_axum::get_maybe_flex::Auth::BearerAuth(b)) => format!("bearer:{}", b.0),
@@ -141,9 +123,7 @@ async fn spawn_server() -> String {
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        axum::serve(listener, MockServer.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, MockServer.router()).await.unwrap();
     });
 
     format!("http://{addr}")

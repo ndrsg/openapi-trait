@@ -21,10 +21,9 @@ impl server::ServerApi for Server {
 
     async fn filter_colors(
         &self,
-        req: server::filter_colors::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: server::filter_colors::Context,
     ) -> Result<server::filter_colors::Response, Self::Error> {
+        let server::filter_colors::Context { req, .. } = ctx;
         let colors: Vec<server::filter_colors::ColorQuery> = req.color;
         let shades: Vec<server::filter_colors::ShadeQuery> = req.shade.unwrap_or_default();
         let mut out: Vec<String> = colors
@@ -54,9 +53,7 @@ async fn spawn_server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Server.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Server.router()).await.unwrap();
     });
     format!("http://{addr}")
 }

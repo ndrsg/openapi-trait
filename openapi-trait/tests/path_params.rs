@@ -20,10 +20,9 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_swapped(
         &self,
-        req: pp_server::get_swapped::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: pp_server::get_swapped::Context,
     ) -> Result<pp_server::get_swapped::Response, Self::Error> {
+        let pp_server::get_swapped::Context { req, .. } = ctx;
         Ok(pp_server::get_swapped::Response::Status200(format!(
             "a={} b={}",
             req.a, req.b
@@ -32,10 +31,9 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_typed(
         &self,
-        req: pp_server::get_typed::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: pp_server::get_typed::Context,
     ) -> Result<pp_server::get_typed::Response, Self::Error> {
+        let pp_server::get_typed::Context { req, .. } = ctx;
         // `id` is an `i64`: this only compiles if the field kept its type.
         let id: i64 = req.id;
         Ok(pp_server::get_typed::Response::Status200(format!(
@@ -46,10 +44,9 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_thing(
         &self,
-        req: pp_server::get_thing::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: pp_server::get_thing::Context,
     ) -> Result<pp_server::get_thing::Response, Self::Error> {
+        let pp_server::get_thing::Context { req, .. } = ctx;
         let kind = match req.kind {
             pp_server::get_thing::KindPath::A => "A",
             pp_server::get_thing::KindPath::B => "B",
@@ -60,10 +57,9 @@ impl pp_server::PpServerApi for Server {
 
     async fn get_dup(
         &self,
-        req: pp_server::get_dup::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: pp_server::get_dup::Context,
     ) -> Result<pp_server::get_dup::Response, Self::Error> {
+        let pp_server::get_dup::Context { req, .. } = ctx;
         let id: i64 = req.id;
         Ok(pp_server::get_dup::Response::Status200(id * 2))
     }
@@ -73,9 +69,7 @@ async fn spawn_server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Server.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Server.router()).await.unwrap();
     });
     format!("http://{addr}")
 }

@@ -30,10 +30,9 @@ pub fn generate_router(
         #auth_helpers
         #query_helpers
 
-        fn make_router<T, S>(__api: ::std::sync::Arc<T>) -> ::axum::Router<S>
+        fn make_router<T>(__api: ::std::sync::Arc<T>) -> ::axum::Router
         where
-            T: #trait_name<S> + ::core::marker::Send + ::core::marker::Sync + 'static,
-            S: ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
+            T: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
         {
             ::axum::Router::new()
                 #(#route_calls)*
@@ -349,6 +348,7 @@ fn status_code_expr(n: u16) -> TokenStream {
 fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let method_ident = &op.method_ident;
     let req_ident = op.request_path();
+    let ctx_ident = op.type_path("Context");
     let path = &op.path;
     let routing_method = format_ident!("{}", op.method);
 
@@ -394,10 +394,7 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
         })
         .collect();
 
-    let mut closure_params: Vec<TokenStream> = vec![
-        quote! { state: ::axum::extract::State<S> },
-        quote! { headers: ::axum::http::HeaderMap },
-    ];
+    let mut closure_params: Vec<TokenStream> = vec![quote! { headers: ::axum::http::HeaderMap }];
     if let Some(p) = path_extractor {
         closure_params.push(p);
     }
@@ -428,7 +425,8 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
                     #auth_extract
                     #(#header_stmts)*
                     let req = #req_ident { #(#req_fields)* };
-                    match __api.#method_ident(req, #auth_call_arg state, headers).await {
+                    let ctx = #ctx_ident::new(req, #auth_call_arg headers);
+                    match __api.#method_ident(ctx).await {
                         ::core::result::Result::Ok(r)  => r.into_response(),
                         ::core::result::Result::Err(e) => e.into_response(),
                     }
@@ -441,7 +439,8 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
 /// Build the auth extraction block + the call-site argument for an operation.
 ///
 /// Returns `(extract_stmts, call_arg)` where `call_arg` is either empty or
-/// `auth,` (with the trailing comma) ready to splice between `req` and `state`.
+/// `auth,` (with the trailing comma) ready to splice between `req` and
+/// `headers` in the `Context::new` call.
 fn build_auth_extractor(op: &OperationInfo, alts: &[&SchemeInfo]) -> (TokenStream, TokenStream) {
     if alts.is_empty() {
         return (quote! {}, quote! {});

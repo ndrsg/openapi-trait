@@ -20,7 +20,8 @@ and replaces the module contents with:
 - A module per operation (`get_pet`) with a `Request` struct for path, query,
   header, and body inputs and a `Response` enum implementing
   `axum::response::IntoResponse`
-- A `{ModName}Api<S = ()>` trait with one method per `operationId`
+- A `{ModName}Api` trait with one method per `operationId`, each taking a
+  `{operation}::Context`
 - A `router()` helper that builds an `axum::Router<S>` for the implementation
 
 The generated trait name comes from the annotated module name, so `mod petstore

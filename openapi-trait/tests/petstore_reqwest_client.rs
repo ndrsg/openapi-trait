@@ -28,11 +28,9 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore_server::get_pet_by_id::Request,
-        _auth: petstore_server::get_pet_by_id::Auth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: petstore_server::get_pet_by_id::Context,
     ) -> Result<petstore_server::get_pet_by_id::Response, Self::Error> {
+        let petstore_server::get_pet_by_id::Context { req, .. } = ctx;
         if req.pet_id == 42 {
             Ok(petstore_server::get_pet_by_id::Response::Status200(
                 petstore_server::Pet {
@@ -51,11 +49,9 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
 
     async fn find_pets_by_status(
         &self,
-        req: petstore_server::find_pets_by_status::Request,
-        _auth: petstore_server::PetstoreAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: petstore_server::find_pets_by_status::Context,
     ) -> Result<petstore_server::find_pets_by_status::Response, Self::Error> {
+        let petstore_server::find_pets_by_status::Context { req, .. } = ctx;
         match req.status {
             petstore_server::find_pets_by_status::StatusQuery::Available => {
                 Ok(petstore_server::find_pets_by_status::Response::Status200(
@@ -75,11 +71,9 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
 
     async fn add_pet(
         &self,
-        req: petstore_server::add_pet::Request,
-        _auth: petstore_server::PetstoreAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: petstore_server::add_pet::Context,
     ) -> Result<petstore_server::add_pet::Response, Self::Error> {
+        let petstore_server::add_pet::Context { req, .. } = ctx;
         Ok(petstore_server::add_pet::Response::Status200(req.body))
     }
 }
@@ -89,7 +83,7 @@ async fn spawn_server() -> std::string::String {
     let addr = listener.local_addr().unwrap();
 
     tokio::spawn(async move {
-        axum::serve(listener, RichMockPetstore.router().with_state(()))
+        axum::serve(listener, RichMockPetstore.router())
             .await
             .unwrap();
     });
@@ -200,11 +194,9 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
 
     async fn get_pet_by_id(
         &self,
-        req: petstore_server::get_pet_by_id::Request,
-        _auth: petstore_server::get_pet_by_id::Auth,
-        _state: axum::extract::State<()>,
-        headers: axum::http::HeaderMap,
+        ctx: petstore_server::get_pet_by_id::Context,
     ) -> Result<petstore_server::get_pet_by_id::Response, Self::Error> {
+        let petstore_server::get_pet_by_id::Context { req, headers, .. } = ctx;
         {
             let mut received = self.received.lock().unwrap();
             for (name, value) in &headers {
@@ -228,21 +220,16 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
 
     async fn find_pets_by_status(
         &self,
-        _req: petstore_server::find_pets_by_status::Request,
-        _auth: petstore_server::PetstoreAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        _ctx: petstore_server::find_pets_by_status::Context,
     ) -> Result<petstore_server::find_pets_by_status::Response, Self::Error> {
         Ok(petstore_server::find_pets_by_status::Response::Status400)
     }
 
     async fn add_pet(
         &self,
-        req: petstore_server::add_pet::Request,
-        _auth: petstore_server::PetstoreAuth,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: petstore_server::add_pet::Context,
     ) -> Result<petstore_server::add_pet::Response, Self::Error> {
+        let petstore_server::add_pet::Context { req, .. } = ctx;
         Ok(petstore_server::add_pet::Response::Status200(req.body))
     }
 }
@@ -255,9 +242,7 @@ async fn generated_reqwest_client_applies_per_request_headers_and_auth() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     tokio::spawn(async move {
-        axum::serve(listener, recorder.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, recorder.router()).await.unwrap();
     });
 
     let client = {

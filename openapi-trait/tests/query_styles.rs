@@ -29,10 +29,9 @@ impl qs::QsApi for Echo {
 
     async fn search_items(
         &self,
-        req: qs::search_items::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: qs::search_items::Context,
     ) -> Result<qs::search_items::Response, Self::Error> {
+        let qs::search_items::Context { req, .. } = ctx;
         Ok(qs::search_items::Response::Status200(qs::SearchResult {
             tag: req.tag.unwrap_or_default(),
             csv: req.csv.unwrap_or_default(),
@@ -48,9 +47,7 @@ async fn spawn_echo_server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Echo.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Echo.router()).await.unwrap();
     });
     format!("http://{addr}")
 }

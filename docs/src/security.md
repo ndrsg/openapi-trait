@@ -25,7 +25,7 @@ These rules decide which operations require credentials:
 
 ## Server side
 
-Secured handlers get an extra `auth` argument right after `req`. The macro
+Secured handlers find the credentials in `ctx.auth`. The macro
 extracts the raw credential and returns `401 Unauthorized` if it is missing,
 **before** your handler runs. Checking that the credential is *valid* is your
 job. For `oauth2` and `openIdConnect` that includes checking the token's
@@ -40,12 +40,9 @@ With alternatives, match on the generated enum:
 ```rust,ignore
 async fn get_flex(
     &self,
-    _req: api::get_flex::Request,
-    auth: api::get_flex::Auth,
-    _state: axum::extract::State<()>,
-    _headers: axum::http::HeaderMap,
+    ctx: api::get_flex::Context,
 ) -> Result<api::get_flex::Response, Self::Error> {
-    let who = match auth {
+    let who = match ctx.auth {
         api::get_flex::Auth::BearerAuth(token) => token.0,
         api::get_flex::Auth::BasicAuth(basic) => basic.username,
     };

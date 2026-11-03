@@ -15,21 +15,15 @@
 //! #[derive(Clone)]
 //! struct MyServer;
 //!
-//! #[derive(Clone)]
-//! struct AppState;
-//!
-//! impl petstore::PetstoreApi<AppState> for MyServer {
+//! impl petstore::PetstoreApi for MyServer {
 //!     type Error = petstore::NotImplemented;
 //!
 //!     async fn get_pet_by_id(
 //!         &self,
-//!         req: petstore::get_pet_by_id::Request,
-//!         _auth: petstore::get_pet_by_id::Auth,
-//!         _state: axum::extract::State<AppState>,
-//!         _headers: axum::http::HeaderMap,
+//!         ctx: petstore::get_pet_by_id::Context,
 //!     ) -> Result<petstore::get_pet_by_id::Response, Self::Error> {
 //!         Ok(petstore::get_pet_by_id::Response::Status200(petstore::Pet {
-//!             id: Some(req.pet_id),
+//!             id: Some(ctx.req.pet_id),
 //!             name: "doggie".into(),
 //!             photo_urls: vec![],
 //!             category: None,
@@ -39,7 +33,7 @@
 //!     }
 //! }
 //!
-//! let app: axum::Router = MyServer.router().with_state(AppState);
+//! let app: axum::Router = MyServer.router();
 //! ```
 //!
 //! The generated trait names come from the annotated module name, so `mod petstore {}`

@@ -11,29 +11,25 @@ pub mod pets {}
 use std::sync::{Arc, Mutex};
 
 // ANCHOR: state
-/// Shared application state, handed to every handler via `axum::extract::State`.
+/// The type that implements the generated API trait. Application state lives
+/// in its fields; every handler reaches it through `&self`.
 #[derive(Clone, Default)]
-struct AppState {
+struct PetServer {
     /// In-memory pet storage.
     pets: Arc<Mutex<Vec<pets::Pet>>>,
 }
 // ANCHOR_END: state
 
 // ANCHOR: impl
-/// The type that implements the generated API trait.
-#[derive(Clone)]
-struct PetServer;
-
-impl pets::PetsApi<AppState> for PetServer {
+impl pets::PetsApi for PetServer {
     type Error = pets::NotImplemented;
 
     async fn list_pets(
         &self,
-        req: pets::list_pets::Request,
-        state: axum::extract::State<AppState>,
-        _headers: axum::http::HeaderMap,
+        ctx: pets::list_pets::Context,
     ) -> Result<pets::list_pets::Response, Self::Error> {
-        let store = state.pets.lock().unwrap();
+        let pets::list_pets::Context { req, .. } = ctx;
+        let store = self.pets.lock().unwrap();
         let limit = req
             .limit
             .map_or(usize::MAX, |n| usize::try_from(n).unwrap_or(0));
@@ -44,16 +40,14 @@ impl pets::PetsApi<AppState> for PetServer {
 
     async fn create_pet(
         &self,
-        req: pets::create_pet::Request,
-        auth: pets::BearerAuth,
-        state: axum::extract::State<AppState>,
-        _headers: axum::http::HeaderMap,
+        ctx: pets::create_pet::Context,
     ) -> Result<pets::create_pet::Response, Self::Error> {
+        let pets::create_pet::Context { req, auth, .. } = ctx;
         // The macro only extracts the token; checking it is up to you.
         if auth.0 != "secret" {
             return Ok(pets::create_pet::Response::Status401);
         }
-        let mut store = state.pets.lock().unwrap();
+        let mut store = self.pets.lock().unwrap();
         let pet = pets::Pet {
             id: i64::try_from(store.len()).unwrap_or(i64::MAX) + 1,
             name: req.body.name,
@@ -66,12 +60,10 @@ impl pets::PetsApi<AppState> for PetServer {
 
     async fn get_pet(
         &self,
-        req: pets::get_pet::Request,
-        _auth: pets::BearerAuth,
-        state: axum::extract::State<AppState>,
-        _headers: axum::http::HeaderMap,
+        ctx: pets::get_pet::Context,
     ) -> Result<pets::get_pet::Response, Self::Error> {
-        let store = state.pets.lock().unwrap();
+        let pets::get_pet::Context { req, .. } = ctx;
+        let store = self.pets.lock().unwrap();
         Ok(store
             .iter()
             .find(|pet| pet.id == req.pet_id)
@@ -89,7 +81,7 @@ impl pets::PetsApi<AppState> for PetServer {
 async fn main() {
     use pets::PetsApi as _;
 
-    let app = PetServer.router().with_state(AppState::default());
+    let app: axum::Router = PetServer::default().router();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
         .unwrap();

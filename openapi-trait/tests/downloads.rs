@@ -16,13 +16,10 @@ use http_body_util::BodyExt;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Clone)]
-struct AppState {
+struct MockDownloads {
     upload_dest: Arc<PathBuf>,
     download_source: Arc<PathBuf>,
 }
-
-#[derive(Clone)]
-struct MockDownloads;
 
 async fn stream_body_to_file(mut body: Body, path: &Path) -> std::io::Result<usize> {
     let mut file = tokio::fs::File::create(path).await?;
@@ -44,17 +41,16 @@ async fn file_to_body(path: &Path) -> std::io::Result<Body> {
     Ok(Body::from_stream(stream))
 }
 
-impl downloads_server::DownloadsServerApi<AppState> for MockDownloads {
+impl downloads_server::DownloadsServerApi for MockDownloads {
     type Error = downloads_server::NotImplemented;
 
     async fn download_file(
         &self,
-        req: downloads_server::download_file::Request,
-        state: axum::extract::State<AppState>,
-        _headers: axum::http::HeaderMap,
+        ctx: downloads_server::download_file::Context,
     ) -> Result<downloads_server::download_file::Response, Self::Error> {
+        let downloads_server::download_file::Context { req, .. } = ctx;
         if req.id == "found" {
-            let body = file_to_body(&state.download_source)
+            let body = file_to_body(&self.download_source)
                 .await
                 .expect("download source readable");
             Ok(downloads_server::download_file::Response::Status200(
@@ -71,11 +67,10 @@ impl downloads_server::DownloadsServerApi<AppState> for MockDownloads {
 
     async fn upload_file(
         &self,
-        req: downloads_server::upload_file::Request,
-        state: axum::extract::State<AppState>,
-        _headers: axum::http::HeaderMap,
+        ctx: downloads_server::upload_file::Context,
     ) -> Result<downloads_server::upload_file::Response, Self::Error> {
-        let nbytes = stream_body_to_file(req.body, &state.upload_dest)
+        let downloads_server::upload_file::Context { req, .. } = ctx;
+        let nbytes = stream_body_to_file(req.body, &self.upload_dest)
             .await
             .expect("upload destination writable");
         Ok(downloads_server::upload_file::Response::Status201(
@@ -89,15 +84,13 @@ impl downloads_server::DownloadsServerApi<AppState> for MockDownloads {
 async fn spawn_server(upload_dest: PathBuf, download_source: PathBuf) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let state = AppState {
+    let server = MockDownloads {
         upload_dest: Arc::new(upload_dest),
         download_source: Arc::new(download_source),
     };
 
     tokio::spawn(async move {
-        axum::serve(listener, MockDownloads.router().with_state(state))
-            .await
-            .unwrap();
+        axum::serve(listener, server.router()).await.unwrap();
     });
 
     format!("http://{addr}")

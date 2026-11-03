@@ -24,8 +24,9 @@ use syn::{parse_macro_input, ItemMod};
 /// - A module per operation (`get_pet`), holding a `Request` struct (bundles
 ///   path, query, header params and the request body) and a `Response` enum
 ///   implementing [`axum::response::IntoResponse`](https://docs.rs/axum/latest/axum/response/trait.IntoResponse.html)
-/// - A `{ModName}Api<S = ()>` trait with one `async fn` per operation (keyed by
-///   `operationId`). Trait methods have a default implementation that returns
+/// - A `{ModName}Api` trait with one `async fn` per operation (keyed by
+///   `operationId`), taking the operation's `Context` (`req`, `auth`,
+///   `headers`). Trait methods have a default implementation that returns
 ///   `500 Internal Server Error`, so you only need to override the operations
 ///   your server handles.
 /// - A `router` method on the trait that wires all operations to an

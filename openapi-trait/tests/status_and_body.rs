@@ -16,10 +16,9 @@ impl sb::SbApi for Server {
 
     async fn get_partial(
         &self,
-        req: sb::get_partial::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sb::get_partial::Context,
     ) -> Result<sb::get_partial::Response, Self::Error> {
+        let sb::get_partial::Context { req, .. } = ctx;
         Ok(match req.which {
             206 => sb::get_partial::Response::Status206("part".into()),
             308 => sb::get_partial::Response::Status308,
@@ -29,19 +28,17 @@ impl sb::SbApi for Server {
 
     async fn opt_body(
         &self,
-        req: sb::opt_body::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sb::opt_body::Context,
     ) -> Result<sb::opt_body::Response, Self::Error> {
+        let sb::opt_body::Context { req, .. } = ctx;
         Ok(sb::opt_body::Response::Status200(format!("{:?}", req.body)))
     }
 
     async fn opt_bin_body(
         &self,
-        req: sb::opt_bin_body::Request,
-        _state: axum::extract::State<()>,
-        _headers: axum::http::HeaderMap,
+        ctx: sb::opt_bin_body::Context,
     ) -> Result<sb::opt_bin_body::Response, Self::Error> {
+        let sb::opt_bin_body::Context { req, .. } = ctx;
         let text = match req.body {
             None => "none".to_owned(),
             Some(body) => {
@@ -57,9 +54,7 @@ async fn spawn_server() -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
-        axum::serve(listener, Server.router().with_state(()))
-            .await
-            .unwrap();
+        axum::serve(listener, Server.router()).await.unwrap();
     });
     format!("http://{addr}")
 }
