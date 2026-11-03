@@ -9,3 +9,4 @@ pub mod args;
 pub mod codegen;
 pub mod debug;
 pub mod source_file;
+pub mod spec;

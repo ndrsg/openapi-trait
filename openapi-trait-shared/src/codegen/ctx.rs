@@ -2,9 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
+use oas3::spec::{ObjectSchema, Schema, Spec};
 use proc_macro2::TokenStream;
 use quote::quote;
+
+use super::model::{self, Kind, SchemaRef};
 
 /// State shared by every codegen stage for one `OpenAPI` document.
 ///
@@ -68,7 +70,7 @@ pub fn root_module() -> TokenStream {
 impl CodegenCtx {
     /// Build the context for `openapi`.
     #[must_use]
-    pub fn new(openapi: &OpenAPI) -> Self {
+    pub fn new(openapi: &Spec) -> Self {
         #[cfg(feature = "validation")]
         let models = super::validation::validatable_model_names(openapi);
         #[cfg(not(feature = "validation"))]
@@ -201,7 +203,7 @@ impl CodegenCtx {
             &self.reaches_via_compositions
         };
         reaches
-            .get(ref_name(reference))
+            .get(model::ref_name(reference))
             .is_some_and(|reached| reached.contains(owner))
     }
 
@@ -226,7 +228,7 @@ impl CodegenCtx {
 /// The type identifiers the macro module defines under fixed names:
 /// component schemas and security schemes. Operation types live in their
 /// own modules (see [`CodegenCtx::with_operation`]).
-fn fixed_type_names(openapi: &OpenAPI) -> BTreeSet<String> {
+fn fixed_type_names(openapi: &Spec) -> BTreeSet<String> {
     let Some(components) = &openapi.components else {
         return BTreeSet::new();
     };
@@ -236,11 +238,6 @@ fn fixed_type_names(openapi: &OpenAPI) -> BTreeSet<String> {
         .chain(components.security_schemes.keys())
         .map(|name| super::idents::schema_type_ident(name).to_string())
         .collect()
-}
-
-/// The component name a `$ref` points at: `#/components/schemas/Foo` → `Foo`.
-fn ref_name(reference: &str) -> &str {
-    reference.rsplit('/').next().unwrap_or(reference)
 }
 
 /// A by-value reference from one component schema to another.
@@ -253,13 +250,8 @@ struct ByValueRef<'a> {
 }
 
 /// For each component schema, its by-value references (see [`by_value_refs`]).
-fn by_value_edges(openapi: &OpenAPI) -> BTreeMap<&str, Vec<ByValueRef<'_>>> {
-    let Some(components) = &openapi.components else {
-        return BTreeMap::new();
-    };
-    components
-        .schemas
-        .iter()
+fn by_value_edges(openapi: &Spec) -> BTreeMap<&str, Vec<ByValueRef<'_>>> {
+    model::component_schemas(openapi)
         .map(|(name, schema)| {
             let mut out = Vec::new();
             by_value_refs(schema, false, &mut out);
@@ -292,37 +284,34 @@ fn reachability(edges: &BTreeMap<&str, Vec<ByValueRef<'_>>>) -> BTreeMap<String,
 /// object properties and in `allOf` / `oneOf` / `anyOf` branches, including
 /// those nested in inline schemas. References behind an array or a map are
 /// skipped, because `Vec` and `HashMap` already add indirection.
-fn by_value_refs<'a>(
-    schema: &'a ReferenceOr<Schema>,
-    in_property: bool,
-    out: &mut Vec<ByValueRef<'a>>,
-) {
-    match schema {
-        ReferenceOr::Reference { reference } => out.push(ByValueRef {
-            target: ref_name(reference),
+fn by_value_refs<'a>(schema: &'a Schema, in_property: bool, out: &mut Vec<ByValueRef<'a>>) {
+    match model::view(schema) {
+        SchemaRef::Ref(reference) => out.push(ByValueRef {
+            target: model::ref_name(reference),
             in_property,
         }),
-        ReferenceOr::Item(schema) => inline_by_value_refs(schema, in_property, out),
+        SchemaRef::Item(schema) => inline_by_value_refs(schema, in_property, out),
     }
 }
 
 /// [`by_value_refs`] for an inline schema.
-fn inline_by_value_refs<'a>(schema: &'a Schema, in_property: bool, out: &mut Vec<ByValueRef<'a>>) {
-    match &schema.schema_kind {
-        SchemaKind::Type(Type::Object(obj)) => {
-            for prop in obj.properties.values() {
-                match prop {
-                    ReferenceOr::Reference { reference } => out.push(ByValueRef {
-                        target: ref_name(reference),
-                        in_property: true,
-                    }),
-                    ReferenceOr::Item(inner) => inline_by_value_refs(inner, true, out),
-                }
+fn inline_by_value_refs<'a>(
+    schema: &'a ObjectSchema,
+    in_property: bool,
+    out: &mut Vec<ByValueRef<'a>>,
+) {
+    match model::kind(schema) {
+        Kind::Object => {
+            for prop in schema.properties.values() {
+                by_value_refs(prop, true, out);
             }
         }
-        SchemaKind::OneOf { one_of: branches }
-        | SchemaKind::AnyOf { any_of: branches }
-        | SchemaKind::AllOf { all_of: branches } => {
+        Kind::OneOf | Kind::AnyOf | Kind::AllOf => {
+            let branches = schema
+                .one_of
+                .iter()
+                .chain(&schema.any_of)
+                .chain(&schema.all_of);
             for branch in branches {
                 by_value_refs(branch, in_property, out);
             }

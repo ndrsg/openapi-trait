@@ -112,7 +112,7 @@ fn run_macro(args: &MacroArgs, item: TokenStream, include_reqwest: bool) -> Toke
         }
     };
 
-    let openapi: openapiv3::OpenAPI = match serde_yaml::from_str(&content) {
+    let openapi = match openapi_trait_shared::spec::load_spec(&content) {
         Ok(value) => value,
         Err(error) => {
             let msg = format!("cannot parse OpenAPI spec `{spec_path_str}`: {error}");

@@ -17,7 +17,12 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 prettyplease = "0.2"
-openapiv3 = "2"
+oas3 = "0.22"
+# `preserve_order` keeps the document order of properties, which is the order
+# of the generated struct fields.
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_path_to_error = "0.1"
+yaml_serde = "0.10"
 heck = "0.5"
 indexmap = "2"
 
@@ -27,9 +32,6 @@ indexmap = "2"
 # facade crate provides the actual `serde_valid` dependency (re-exported for the
 # generated code); this flag only toggles what the codegen emits.
 validation = []
-
-[dev-dependencies]
-serde_yaml = "0.9"
 
 [lints]
 workspace = true

@@ -13,7 +13,7 @@
 //! alternatives.
 
 use heck::{ToPascalCase, ToSnakeCase};
-use openapiv3::{APIKeyLocation, OpenAPI, Operation, ReferenceOr, SecurityScheme};
+use oas3::spec::{ObjectOrReference, Operation, SecurityScheme, Spec};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -59,38 +59,40 @@ pub struct OpSecurity {
 
 /// Read `components.securitySchemes` and keep only schemes supported in v0.1.
 #[must_use]
-pub fn collect_schemes(openapi: &OpenAPI) -> Vec<SchemeInfo> {
+pub fn collect_schemes(openapi: &Spec) -> Vec<SchemeInfo> {
     let Some(components) = openapi.components.as_ref() else {
         return Vec::new();
     };
     let mut out = Vec::new();
     for (name, ref_or) in &components.security_schemes {
         let scheme = match ref_or {
-            ReferenceOr::Item(s) => s,
-            ReferenceOr::Reference { .. } => continue,
+            ObjectOrReference::Object(s) => s,
+            ObjectOrReference::Ref { .. } => continue,
         };
         let kind = match scheme {
-            SecurityScheme::APIKey { location, name, .. } => {
-                let loc = match location {
-                    APIKeyLocation::Header => ApiKeyIn::Header,
-                    APIKeyLocation::Query => ApiKeyIn::Query,
-                    APIKeyLocation::Cookie => ApiKeyIn::Cookie,
+            SecurityScheme::ApiKey { location, name, .. } => {
+                let loc = match location.as_str() {
+                    "header" => ApiKeyIn::Header,
+                    "query" => ApiKeyIn::Query,
+                    "cookie" => ApiKeyIn::Cookie,
+                    _ => continue,
                 };
                 SchemeKind::ApiKey {
                     key: name.clone(),
                     location: loc,
                 }
             }
-            SecurityScheme::HTTP { scheme, .. } => match scheme.to_ascii_lowercase().as_str() {
+            SecurityScheme::Http { scheme, .. } => match scheme.to_ascii_lowercase().as_str() {
                 "bearer" => SchemeKind::HttpBearer,
                 "basic" => SchemeKind::HttpBasic,
                 _ => continue,
             },
             // Both send the access token as `Authorization: Bearer <token>`.
             // Validating the token, including its scopes, is the handler's job.
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => {
+            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIdConnect { .. } => {
                 SchemeKind::HttpBearer
             }
+            SecurityScheme::MutualTls { .. } => continue,
         };
         let ident = super::idents::schema_type_ident(name);
         let snake = name.to_snake_case();
@@ -107,30 +109,31 @@ pub fn collect_schemes(openapi: &OpenAPI) -> Vec<SchemeInfo> {
 /// Resolve the effective security requirements for an operation.
 ///
 /// Semantics:
-/// - `operation.security == Some(vec![])` → explicit disable (no auth).
-/// - `operation.security == Some(non-empty)` → use op-level requirements.
-/// - `operation.security == None` → inherit `openapi.security` (doc-level default).
+/// - `security: []` on the operation → explicit disable (no auth).
+/// - non-empty `security` on the operation → use op-level requirements.
+/// - no `security` on the operation → inherit `openapi.security` (doc-level
+///   default). [`oas3`] can't tell this case from `security: []`, so the
+///   loader marks operations that declare it (see
+///   [`crate::spec::OPERATION_HAS_SECURITY`]).
+/// - unknown `apiKey` locations and `mutualTLS` schemes are skipped.
 ///
 /// Each requirement object must reference exactly one supported scheme name to
 /// be accepted; requirements naming unknown schemes are dropped, and multi-key
 /// requirements (AND) are flagged via `had_unsupported_and` and otherwise dropped.
 /// An empty requirement (`{}`) allows anonymous requests and sets `optional`.
 #[must_use]
-pub fn resolve_op_security(
-    op: &Operation,
-    openapi: &OpenAPI,
-    schemes: &[SchemeInfo],
-) -> OpSecurity {
-    let requirements = match op.security.as_ref() {
-        Some(v) => v,
-        None => match openapi.security.as_ref() {
-            Some(v) => v,
-            None => return OpSecurity::default(),
-        },
+pub fn resolve_op_security(op: &Operation, openapi: &Spec, schemes: &[SchemeInfo]) -> OpSecurity {
+    let requirements = if op
+        .extensions
+        .contains_key(crate::spec::OPERATION_HAS_SECURITY)
+    {
+        &op.security
+    } else {
+        &openapi.security
     };
 
     let mut out = OpSecurity::default();
-    for req in requirements {
+    for oas3::spec::SecurityRequirement(req) in requirements {
         if req.len() > 1 {
             out.had_unsupported_and = true;
             continue;

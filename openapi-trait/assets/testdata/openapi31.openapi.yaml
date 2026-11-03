@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: OpenAPI 3.1 features
+  version: "1.0"
+security:
+  - bearer: []
+paths:
+  /things/{id}:
+    get:
+      operationId: getThing
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          description: The thing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+    put:
+      operationId: putThing
+      # Turns off the document's bearer requirement.
+      security: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+        # A parameter can't be `null` on the wire, so this stays a string.
+        - { name: tag, in: query, schema: { type: [string, "null"] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Thing" }
+      responses:
+        "200":
+          description: The stored thing.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Thing" }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  schemas:
+    Owner:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+    Kind:
+      type: string
+      enum: [small, large]
+    Thing:
+      type: object
+      required: [name, owner, kind, scores, labels, version, count]
+      properties:
+        name:
+          description: Required, but may be null.
+          type: [string, "null"]
+          examples: [widget]
+        owner:
+          description: A nullable reference.
+          oneOf:
+            - $ref: "#/components/schemas/Owner"
+            - type: "null"
+        kind:
+          anyOf:
+            - $ref: "#/components/schemas/Kind"
+            - type: "null"
+        scores:
+          type: array
+          items: { type: [integer, "null"] }
+        labels:
+          type: object
+          additionalProperties: { type: [string, "null"] }
+        version:
+          type: string
+          const: v1
+        count:
+          type: integer
+          exclusiveMinimum: 0
+          maximum: 10
+        ratio:
+          type: number
+          exclusiveMaximum: 1
+        anything:
+          description: Several types become untyped JSON.
+          type: [string, integer]

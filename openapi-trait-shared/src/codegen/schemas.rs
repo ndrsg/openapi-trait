@@ -1,14 +1,12 @@
 use heck::{ToPascalCase, ToSnakeCase};
-use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
+use oas3::spec::{ObjectSchema, Schema, Spec};
 use proc_macro2::TokenStream;
 use quote::quote;
 
 use super::compositions::{generate_all_of, generate_any_of, generate_one_of};
 use super::ctx::CodegenCtx;
-use super::types::{
-    additional_properties_value_type, is_string_enum, ref_to_ident, schema_to_rust_type_ctx,
-    string_enum_values,
-};
+use super::model::{self, Kind, SchemaRef};
+use super::types::{additional_properties_value_type, ref_to_ident, schema_to_rust_type_ctx};
 
 /// Generate all schema structs and enums from `components/schemas`.
 ///
@@ -16,14 +14,8 @@ use super::types::{
 /// is hoisted to a synthesized top-level type and emitted alongside the named
 /// schemas, so the resulting module is self-contained.
 #[must_use]
-pub fn generate_schemas(openapi: &OpenAPI, ctx: &mut CodegenCtx) -> TokenStream {
-    let Some(components) = &openapi.components else {
-        return quote! {};
-    };
-
-    let items: Vec<TokenStream> = components
-        .schemas
-        .iter()
+pub fn generate_schemas(openapi: &Spec, ctx: &mut CodegenCtx) -> TokenStream {
+    let items: Vec<TokenStream> = model::component_schemas(openapi)
         .map(|(name, ref_or)| generate_schema_item(name, ref_or, ctx))
         .collect();
     let inline_types = ctx.take_inline_types();
@@ -38,23 +30,15 @@ pub fn generate_schemas(openapi: &OpenAPI, ctx: &mut CodegenCtx) -> TokenStream 
 ///
 /// By-value references that lead back to `name` are boxed (see
 /// [`CodegenCtx::ref_type`]), so recursive schemas get a finite size.
-fn generate_schema_item(
-    name: &str,
-    ref_or: &ReferenceOr<Schema>,
-    ctx: &mut CodegenCtx,
-) -> TokenStream {
+fn generate_schema_item(name: &str, ref_or: &Schema, ctx: &mut CodegenCtx) -> TokenStream {
     ctx.with_owner(name, |ctx| generate_schema_item_inner(name, ref_or, ctx))
 }
 
 /// [`generate_schema_item`] with the owner already set.
-fn generate_schema_item_inner(
-    name: &str,
-    ref_or: &ReferenceOr<Schema>,
-    ctx: &mut CodegenCtx,
-) -> TokenStream {
-    let schema = match ref_or {
-        ReferenceOr::Item(s) => s,
-        ReferenceOr::Reference { reference } => {
+fn generate_schema_item_inner(name: &str, ref_or: &Schema, ctx: &mut CodegenCtx) -> TokenStream {
+    let schema = match model::view(ref_or) {
+        SchemaRef::Item(s) => s,
+        SchemaRef::Ref(reference) => {
             // Unusual: a component schema that is itself a $ref; just emit a type alias.
             let ident = super::idents::schema_type_ident(name);
             let target = ref_to_ident(reference);
@@ -62,30 +46,26 @@ fn generate_schema_item_inner(
         }
     };
 
-    if is_string_enum(schema) {
+    if model::is_string_enum(schema) {
         return generate_string_enum(name, schema);
     }
 
-    match &schema.schema_kind {
-        SchemaKind::OneOf { one_of } => generate_one_of(
+    match model::kind(schema) {
+        Kind::OneOf => generate_one_of(
             name,
-            one_of,
-            schema.schema_data.discriminator.as_ref(),
-            schema.schema_data.description.as_ref(),
+            &schema.one_of,
+            schema.discriminator.as_ref(),
+            schema.description.as_ref(),
             ctx,
         ),
-        SchemaKind::AnyOf { any_of } => {
-            generate_any_of(name, any_of, schema.schema_data.description.as_ref(), ctx)
-        }
-        SchemaKind::AllOf { all_of } => {
-            generate_all_of(name, all_of, schema.schema_data.description.as_ref(), ctx)
-        }
-        SchemaKind::Type(Type::Object(obj)) => generate_object_struct(name, schema, obj, ctx),
+        Kind::AnyOf => generate_any_of(name, &schema.any_of, schema.description.as_ref(), ctx),
+        Kind::AllOf => generate_all_of(name, &schema.all_of, schema.description.as_ref(), ctx),
+        Kind::Object => generate_object_struct(name, schema, ctx),
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
             let ident = super::idents::schema_type_ident(name);
             let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), ctx);
-            let doc = doc_attr(&schema.schema_data.description);
+            let doc = doc_attr(&schema.description);
             quote! {
                 #doc
                 pub type #ident = #inner;
@@ -95,10 +75,10 @@ fn generate_schema_item_inner(
 }
 
 /// Generate a string enum type from a schema.
-pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
+pub(crate) fn generate_string_enum(name: &str, schema: &ObjectSchema) -> TokenStream {
     let ident = super::idents::schema_type_ident(name);
-    let doc = doc_attr(&schema.schema_data.description);
-    let values = string_enum_values(schema);
+    let doc = doc_attr(&schema.description);
+    let values = model::string_enum_values(schema).unwrap_or_default();
     let variants = super::idents::enum_variant_idents(&values)
         .into_iter()
         .zip(&values)
@@ -132,14 +112,9 @@ pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
 /// A schema with no declared properties (a pure map) instead becomes a
 /// `HashMap` type alias.
 #[must_use]
-pub fn generate_object_struct(
-    name: &str,
-    schema: &Schema,
-    obj: &openapiv3::ObjectType,
-    ctx: &mut CodegenCtx,
-) -> TokenStream {
+pub fn generate_object_struct(name: &str, obj: &ObjectSchema, ctx: &mut CodegenCtx) -> TokenStream {
     let ident = super::idents::schema_type_ident(name);
-    let doc = doc_attr(&schema.schema_data.description);
+    let doc = doc_attr(&obj.description);
 
     // A pure-map object (no declared properties, only `additionalProperties`)
     // is emitted as a `HashMap` type alias rather than an empty struct.
@@ -160,13 +135,7 @@ pub fn generate_object_struct(
         .iter()
         .map(|(prop_name, prop_ref_or)| {
             let is_required = obj.required.iter().any(|r| r == prop_name);
-            object_field_tokens(
-                prop_name,
-                &prop_ref_or.clone().unbox(),
-                is_required,
-                name,
-                ctx,
-            )
+            object_field_tokens(prop_name, prop_ref_or, is_required, name, ctx)
         })
         .collect();
 
@@ -205,7 +174,7 @@ pub fn generate_object_struct(
 #[must_use]
 pub fn object_field_tokens(
     prop_name: &str,
-    prop_ref_or: &ReferenceOr<Schema>,
+    prop_ref_or: &Schema,
     is_required: bool,
     parent_struct_name: &str,
     ctx: &mut CodegenCtx,
@@ -217,10 +186,7 @@ pub fn object_field_tokens(
         quote! { #[serde(rename = #n)] }
     };
 
-    let field_doc = match prop_ref_or {
-        ReferenceOr::Item(s) => doc_attr(&s.schema_data.description),
-        ReferenceOr::Reference { .. } => quote! {},
-    };
+    let field_doc = doc_attr(&model::description(prop_ref_or).cloned());
 
     // An optional field is left out when `None` instead of being sent as
     // `null`, which the spec only allows for nullable fields. A required
@@ -243,8 +209,8 @@ pub fn object_field_tokens(
     // field (`Option<Box<T>>`) can't recurse. A required one can, because the
     // derive's `field.validate()` call auto-derefs through the `Box`.
     #[cfg(feature = "validation")]
-    let validate_attrs = match prop_ref_or {
-        ReferenceOr::Reference { reference }
+    let validate_attrs = match model::view(prop_ref_or) {
+        SchemaRef::Ref(reference)
             if !is_required && ctx.in_property(|ctx| ctx.needs_box(reference)) =>
         {
             quote! {}

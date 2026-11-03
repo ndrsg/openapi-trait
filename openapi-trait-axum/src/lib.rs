@@ -115,7 +115,7 @@ fn run_macro(args: &MacroArgs, item: TokenStream) -> TokenStream {
         }
     };
 
-    let openapi: openapiv3::OpenAPI = match serde_yaml::from_str(&content) {
+    let openapi = match openapi_trait_shared::spec::load_spec(&content) {
         Ok(o) => o,
         Err(e) => {
             let msg = format!("cannot parse OpenAPI spec `{spec_path_str}`: {e}");

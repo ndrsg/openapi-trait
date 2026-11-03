@@ -31,7 +31,7 @@ Servers still need `axum` as a dependency, so you pick its version.
 
 ## Minimum Rust version
 
-Rust **1.75**, the first release with `async fn` in traits.
+Rust **1.87**.
 
 ## Changelog
 
