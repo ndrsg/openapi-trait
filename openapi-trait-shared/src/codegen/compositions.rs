@@ -23,7 +23,7 @@ use quote::{format_ident, quote};
 
 use super::ctx::CodegenCtx;
 use super::schemas::{doc_attr, model_derives, object_field_tokens};
-use super::types::{ref_to_ident, schema_to_rust_type_ctx};
+use super::types::schema_to_rust_type_ctx;
 
 /// Generate a Rust enum type for a `oneOf` composition.
 ///
@@ -79,7 +79,7 @@ pub fn generate_all_of(
             ReferenceOr::Reference { reference } => {
                 ref_field_counter += 1;
                 let field_ident = format_ident!("inner_{}", ref_field_counter);
-                let ty = ref_to_ident(reference);
+                let ty = ctx.ref_type(reference);
                 fields.push(quote! {
                     #[serde(flatten)]
                     pub #field_ident: #ty,
@@ -176,7 +176,7 @@ fn build_enum_variant(
         ReferenceOr::Reference { reference } => {
             let target_name = reference.rsplit('/').next().unwrap_or(reference);
             let variant_ident = super::idents::schema_type_ident(target_name);
-            let ty = ref_to_ident(reference);
+            let ty = ctx.ref_type(reference);
             // For tagged enums the rename governs the discriminator value on
             // the wire; for untagged enums the variant name is structural and
             // the rename is a no-op (but harmless).

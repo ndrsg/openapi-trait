@@ -35,7 +35,19 @@ pub fn generate_schemas(openapi: &OpenAPI, ctx: &mut CodegenCtx) -> TokenStream 
 }
 
 /// Generate a single schema item (enum, struct, or type alias).
+///
+/// By-value references that lead back to `name` are boxed (see
+/// [`CodegenCtx::ref_type`]), so recursive schemas get a finite size.
 fn generate_schema_item(
+    name: &str,
+    ref_or: &ReferenceOr<Schema>,
+    ctx: &mut CodegenCtx,
+) -> TokenStream {
+    ctx.with_owner(name, |ctx| generate_schema_item_inner(name, ref_or, ctx))
+}
+
+/// [`generate_schema_item`] with the owner already set.
+fn generate_schema_item_inner(
     name: &str,
     ref_or: &ReferenceOr<Schema>,
     ctx: &mut CodegenCtx,
@@ -220,13 +232,25 @@ pub fn object_field_tokens(
     };
 
     let synth_name = format!("{parent_struct_name}{}", prop_name.to_pascal_case());
-    let field_type = schema_to_rust_type_ctx(prop_ref_or, is_required, Some(&synth_name), ctx);
+    let field_type = ctx.in_property(|ctx| {
+        schema_to_rust_type_ctx(prop_ref_or, is_required, Some(&synth_name), ctx)
+    });
 
     // `serde_valid` validation attributes derived from the schema's constraints
     // (`minLength`, `minimum`, `minItems`, …). Emitted only under the
     // `validation` feature; otherwise the field is byte-identical to before.
+    // `serde_valid` has no `Validate` impl for `Box<T>`, so an optional boxed
+    // field (`Option<Box<T>>`) can't recurse. A required one can, because the
+    // derive's `field.validate()` call auto-derefs through the `Box`.
     #[cfg(feature = "validation")]
-    let validate_attrs = super::validation::validation_attrs(prop_ref_or, &ctx.models);
+    let validate_attrs = match prop_ref_or {
+        ReferenceOr::Reference { reference }
+            if !is_required && ctx.in_property(|ctx| ctx.needs_box(reference)) =>
+        {
+            quote! {}
+        }
+        _ => super::validation::validation_attrs(prop_ref_or, &ctx.models),
+    };
     #[cfg(not(feature = "validation"))]
     let validate_attrs = quote! {};
 

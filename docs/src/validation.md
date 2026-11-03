@@ -33,6 +33,9 @@ to depend on it yourself.
   sending.
 - **Feature off, no change.** Without the feature, the generated code is
   exactly the same as before.
+- **Optional recursive fields aren't checked.** `serde_valid` can't recurse
+  into `Option<Box<T>>`, so the optional field that closes a cycle in a
+  recursive schema gets no `#[validate]`.
 - **Type aliases can't be validated directly.** A top-level schema that
   becomes an alias (for example `pub type Name = String;`) is only checked
   where it appears as a struct field.
