@@ -70,13 +70,14 @@ pub const fn is_nullable(ref_or: &ReferenceOr<Schema>) -> bool {
 
 /// Like [`ref_or_to_inner_type_ctx`], but wraps the type in `Option<T>` when
 /// the schema is nullable. Used for array items and map values, where `null`
-/// entries are allowed only if the item schema is nullable.
+/// entries are allowed only if the item schema is nullable. The container
+/// already adds indirection, so references in here are never boxed.
 fn nullable_inner_type_ctx(
     ref_or: &ReferenceOr<Schema>,
     parent_name: Option<&str>,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    let inner = ref_or_to_inner_type_ctx(ref_or, parent_name, ctx);
+    let inner = ctx.behind_indirection(|ctx| ref_or_to_inner_type_ctx(ref_or, parent_name, ctx));
     if is_nullable(ref_or) {
         quote! { ::core::option::Option<#inner> }
     } else {
@@ -92,7 +93,7 @@ fn ref_or_to_inner_type_ctx(
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
     match ref_or {
-        ReferenceOr::Reference { reference } => ref_to_ident(reference),
+        ReferenceOr::Reference { reference } => ctx.ref_type(reference),
         ReferenceOr::Item(schema) => schema_kind_to_type(schema, parent_name, ctx),
     }
 }

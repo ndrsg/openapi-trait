@@ -1,0 +1,67 @@
+# Regression fixture for KNOWN_ISSUES.md C4: recursive schemas must get a
+# finite size (`Box<T>` on the edge that closes a cycle).
+openapi: 3.0.1
+info:
+  title: recursive
+  version: 0.0.1
+paths:
+  /nodes:
+    post:
+      operationId: createNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Node' }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Expr' }
+components:
+  schemas:
+    # Self-reference; `children` is behind a `Vec` and needs no box.
+    Node:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        parent: { $ref: '#/components/schemas/Node' }
+        children:
+          type: array
+          items: { $ref: '#/components/schemas/Node' }
+    # Mutual recursion: A.b -> B, B.a -> A.
+    A:
+      type: object
+      properties:
+        b: { $ref: '#/components/schemas/B' }
+    B:
+      type: object
+      properties:
+        a: { $ref: '#/components/schemas/A' }
+    # Recursion through `oneOf`: only the struct fields get a box.
+    Expr:
+      oneOf:
+        - { $ref: '#/components/schemas/Literal' }
+        - { $ref: '#/components/schemas/BinOp' }
+    Literal:
+      type: object
+      required: [value]
+      properties:
+        value: { type: integer }
+    BinOp:
+      type: object
+      required: [op, left, right]
+      properties:
+        op: { type: string }
+        left: { $ref: '#/components/schemas/Expr' }
+        right: { $ref: '#/components/schemas/Expr' }
+    # Recursion through an inline object property.
+    Person:
+      type: object
+      properties:
+        address:
+          type: object
+          properties:
+            resident: { $ref: '#/components/schemas/Person' }
