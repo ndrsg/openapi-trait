@@ -43,3 +43,7 @@ serde_valid = "2"
 
 [lints]
 workspace = true
+
+[[example]]
+name = "validation"
+required-features = ["validation"]

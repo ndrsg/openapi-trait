@@ -22,6 +22,8 @@ jobs:
       run: cargo clippy --all-targets --features validation
     - name: Build
       run: cargo build --verbose
+    - name: Build examples
+      run: cargo build --examples --all-features
     - name: Run tests
       run: cargo test --verbose
     - name: Run tests (validation)

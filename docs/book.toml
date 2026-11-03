@@ -1,0 +1,14 @@
+[book]
+title = "openapi-trait"
+description = "Generate typed Rust traits from OpenAPI specifications"
+authors = ["ndrsg"]
+language = "en"
+src = "src"
+
+[output.html]
+site-url = "/openapi-trait/"
+git-repository-url = "https://github.com/ndrsg/openapi-trait"
+edit-url-template = "https://github.com/ndrsg/openapi-trait/edit/main/docs/{path}"
+
+[output.html.playground]
+runnable = false

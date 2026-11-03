@@ -59,7 +59,7 @@
 //! the feature) and call `.validate()`:
 //!
 //! ```toml
-//! openapi-trait = { version = "0.1", features = ["validation"] }
+//! openapi-trait = { version = "0.0.9", features = ["validation"] }
 //! ```
 //!
 //! ```ignore
