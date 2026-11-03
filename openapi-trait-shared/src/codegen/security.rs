@@ -52,6 +52,9 @@ pub struct OpSecurity {
     pub alternatives: Vec<String>,
     /// True if a multi-scheme AND requirement was rejected for this op.
     pub had_unsupported_and: bool,
+    /// True if one of the requirements is empty (`{}`), which makes auth
+    /// optional: the request may also be anonymous.
+    pub optional: bool,
 }
 
 /// Read `components.securitySchemes` and keep only schemes supported in v0.1.
@@ -111,6 +114,7 @@ pub fn collect_schemes(openapi: &OpenAPI) -> Vec<SchemeInfo> {
 /// Each requirement object must reference exactly one supported scheme name to
 /// be accepted; requirements naming unknown schemes are dropped, and multi-key
 /// requirements (AND) are flagged via `had_unsupported_and` and otherwise dropped.
+/// An empty requirement (`{}`) allows anonymous requests and sets `optional`.
 #[must_use]
 pub fn resolve_op_security(
     op: &Operation,
@@ -132,6 +136,7 @@ pub fn resolve_op_security(
             continue;
         }
         let Some((name, _scopes)) = req.iter().next() else {
+            out.optional = true;
             continue;
         };
         if scheme_by_name(schemes, name).is_some() {

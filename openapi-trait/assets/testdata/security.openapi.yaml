@@ -87,6 +87,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenPayload"
+  /maybe:
+    get:
+      operationId: getMaybe
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KindPayload"
+  /maybe-flex:
+    get:
+      operationId: getMaybeFlex
+      security:
+        - bearerAuth: []
+        - basicAuth: []
+        - {}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KindPayload"
 components:
   schemas:
     OkPayload:

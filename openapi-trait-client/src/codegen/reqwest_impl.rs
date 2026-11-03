@@ -346,32 +346,7 @@ fn generate_auth_inject(
 
     let scheme_label = op.auth.alternatives.join(",");
 
-    // A request that supplies its own credentials via `RequestOptions`
-    // (`bearer_auth`/`basic_auth`) is valid even when the client carries no
-    // configured scheme credential, so skip the missing-credential pre-flight
-    // check in that case. The options themselves are applied after this block
-    // and replace any scheme-injected `Authorization` header.
-    let options_provide_auth = quote! {
-        let __options_provides_auth = match &options {
-            ::core::option::Option::Some(options) => options.provides_auth(),
-            ::core::option::Option::None => false,
-        };
-    };
-
-    if alts.len() == 1 {
-        let inject = inject_scheme_expr(alts[0]);
-        return quote! {
-            #options_provide_auth
-            let __injected = #inject;
-            if !__injected && !__options_provides_auth {
-                return ::core::result::Result::Err(#error_name::MissingCredential {
-                    operation: #operation_name,
-                    scheme: #scheme_label,
-                });
-            }
-        };
-    }
-
+    // Try each alternative in order until one credential is injected.
     let attempts: Vec<TokenStream> = alts
         .iter()
         .map(|s| {
@@ -383,6 +358,28 @@ fn generate_auth_inject(
             }
         })
         .collect();
+
+    // With optional auth (`security: [{}, …]`) an anonymous request is valid:
+    // inject whichever credential is configured and never fail.
+    if op.auth.optional {
+        return quote! {
+            let mut __injected = false;
+            #(#attempts)*
+            let _ = __injected;
+        };
+    }
+
+    // A request that supplies its own credentials via `RequestOptions`
+    // (`bearer_auth`/`basic_auth`) is valid even when the client carries no
+    // configured scheme credential, so skip the missing-credential pre-flight
+    // check in that case. The options themselves are applied after this block
+    // and replace any scheme-injected `Authorization` header.
+    let options_provide_auth = quote! {
+        let __options_provides_auth = match &options {
+            ::core::option::Option::Some(options) => options.provides_auth(),
+            ::core::option::Option::None => false,
+        };
+    };
 
     quote! {
         #options_provide_auth

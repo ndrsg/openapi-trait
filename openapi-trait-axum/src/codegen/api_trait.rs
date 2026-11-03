@@ -80,17 +80,30 @@ fn generate_trait_method(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStr
     };
 
     let alts = resolve_alternatives(&op.auth, schemes);
-    let (auth_param, auth_discard) = match alts.len() {
-        0 => (quote! {}, quote! {}),
+    let auth_ty = match alts.len() {
+        0 => None,
         1 => {
             let ty = &alts[0].ident;
-            (quote! { auth: #ty, }, quote! { let _ = auth; })
+            Some(quote! { #ty })
         }
         _ => {
             let ty = auth_enum_ident(&op.operation_id);
-            (quote! { auth: #ty, }, quote! { let _ = auth; })
+            Some(quote! { #ty })
         }
     };
+    // With optional auth (`security: [{}, …]`) the handler gets `None` for an
+    // anonymous request.
+    let auth_ty = auth_ty.map(|ty| {
+        if op.auth.optional {
+            quote! { ::core::option::Option<#ty> }
+        } else {
+            ty
+        }
+    });
+    let (auth_param, auth_discard) = auth_ty.map_or_else(
+        || (quote! {}, quote! {}),
+        |ty| (quote! { auth: #ty, }, quote! { let _ = auth; }),
+    );
 
     quote! {
         #doc
