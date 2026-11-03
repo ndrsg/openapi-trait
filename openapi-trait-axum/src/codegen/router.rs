@@ -92,12 +92,12 @@ fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> Toke
 
     let de = if needs_de {
         quote! {
-            fn __query_de<T: ::serde::de::DeserializeOwned>(raw: &str) -> ::core::option::Option<T> {
-                if let ::core::result::Result::Ok(value) = ::serde_json::from_str::<T>(raw) {
+            fn __query_de<T: ::openapi_trait::serde::de::DeserializeOwned>(raw: &str) -> ::core::option::Option<T> {
+                if let ::core::result::Result::Ok(value) = ::openapi_trait::serde_json::from_str::<T>(raw) {
                     return ::core::option::Option::Some(value);
                 }
-                let quoted = ::serde_json::Value::String(raw.to_string()).to_string();
-                ::serde_json::from_str::<T>(&quoted).ok()
+                let quoted = ::openapi_trait::serde_json::Value::String(raw.to_string()).to_string();
+                ::openapi_trait::serde_json::from_str::<T>(&quoted).ok()
             }
         }
     } else {
@@ -688,7 +688,7 @@ fn array_query_binding(param: &ParamInfo) -> TokenStream {
         .query
         .array_item_type
         .clone()
-        .unwrap_or_else(|| quote! { ::serde_json::Value });
+        .unwrap_or_else(|| quote! { ::openapi_trait::serde_json::Value });
     let bad_element = invalid_query_param(name);
 
     if param.query.explode {

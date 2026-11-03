@@ -583,7 +583,7 @@ fn param_array_item_type(
         return None;
     };
     let Some(items) = &arr.items else {
-        return Some(quote! { ::serde_json::Value });
+        return Some(quote! { ::openapi_trait::serde_json::Value });
     };
     let items = items.clone().unbox();
     if !matches!(param, Parameter::Query { .. }) {
@@ -1176,9 +1176,10 @@ fn generate_param_enums(op: &OperationInfo) -> TokenStream {
                     ::core::cmp::PartialEq,
                     ::core::cmp::Eq,
                     ::core::hash::Hash,
-                    ::serde::Serialize,
-                    ::serde::Deserialize,
+                    ::openapi_trait::serde::Serialize,
+                    ::openapi_trait::serde::Deserialize,
                 )]
+                #[serde(crate = "::openapi_trait::serde")]
 
                 pub enum #ident {
                     #(#variants,)*

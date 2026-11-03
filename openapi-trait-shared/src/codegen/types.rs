@@ -146,7 +146,7 @@ fn schema_kind_to_type(
         }
         SchemaKind::Not { .. } | SchemaKind::Any(_) => {
             // Intentionally unsupported: emit untyped JSON.
-            quote! { ::serde_json::Value }
+            quote! { ::openapi_trait::serde_json::Value }
         }
     }
 }
@@ -181,7 +181,7 @@ fn synthesize_inline_composition(
     generate: impl FnOnce(&str, &mut CodegenCtx) -> TokenStream,
 ) -> TokenStream {
     parent_name.map_or_else(
-        || quote! { ::serde_json::Value },
+        || quote! { ::openapi_trait::serde_json::Value },
         |name| {
             let name = ctx.reserve_type_name(name);
             let tokens = generate(&name, ctx);
@@ -216,14 +216,14 @@ fn primitive_type_to_rust(
         Type::Boolean(_) => quote! { bool },
         Type::Array(a) => {
             let item_ty = a.items.as_ref().map_or_else(
-                || quote! { ::serde_json::Value },
+                || quote! { ::openapi_trait::serde_json::Value },
                 |items| nullable_inner_type_ctx(&items.clone().unbox(), parent_name, ctx),
             );
             quote! { ::std::vec::Vec<#item_ty> }
         }
         // Objects are handled in `schema_kind_to_type`, which has the full
         // schema (description, synthesis context) available.
-        Type::Object(_) => quote! { ::serde_json::Value },
+        Type::Object(_) => quote! { ::openapi_trait::serde_json::Value },
     }
 }
 
@@ -285,7 +285,7 @@ fn object_schema_to_type(
             };
         }
     }
-    quote! { ::serde_json::Value }
+    quote! { ::openapi_trait::serde_json::Value }
 }
 
 /// Resolve an `additionalProperties` declaration to the value type `T` of the
@@ -303,7 +303,7 @@ pub fn additional_properties_value_type(
 ) -> Option<TokenStream> {
     match ap {
         AdditionalProperties::Any(false) => None,
-        AdditionalProperties::Any(true) => Some(quote! { ::serde_json::Value }),
+        AdditionalProperties::Any(true) => Some(quote! { ::openapi_trait::serde_json::Value }),
         AdditionalProperties::Schema(schema) => {
             Some(nullable_inner_type_ctx(schema, parent_name, ctx))
         }

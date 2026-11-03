@@ -260,6 +260,14 @@ pub use chrono;
 pub use form_urlencoded;
 pub use uuid;
 
+/// Re-export of [`serde`], used by the generated types' `Serialize` and
+/// `Deserialize` derives (through `#[serde(crate = "::openapi_trait::serde")]`),
+/// so you don't need `serde` as a dependency.
+pub use serde;
+/// Re-export of [`serde_json`]. Generated code uses it for JSON values
+/// (`serde_json::Value`) and query parameter encoding.
+pub use serde_json;
+
 /// Re-export of [`serde_valid`], backing the `#[validate(...)]` attributes on
 /// generated model types when the `validation` feature is enabled.
 ///

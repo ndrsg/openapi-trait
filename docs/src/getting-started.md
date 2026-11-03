@@ -9,7 +9,6 @@ openapi-trait = "0.0.9"
 # For servers:
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
 ```
 
 The `reqwest-client` feature is on by default. See
