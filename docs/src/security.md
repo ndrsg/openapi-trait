@@ -8,7 +8,7 @@ named after the scheme key in PascalCase:
 | `apiKey` (in `header`, `query` or `cookie`) | `pub struct ApiKey(pub String)` |
 | `http` with `scheme: bearer` | `pub struct BearerAuth(pub String)` |
 | `http` with `scheme: basic` | `pub struct BasicAuth { pub username: String, pub password: String }` |
-| `oauth2`, `openIdConnect` | recognised, but no code is generated |
+| `oauth2`, `openIdConnect` | `pub struct OAuth(pub String)`, the access token sent as `Authorization: Bearer <token>` |
 
 These rules decide which operations require credentials:
 
@@ -24,7 +24,8 @@ These rules decide which operations require credentials:
 Secured handlers get an extra `auth` argument right after `req`. The macro
 extracts the raw credential and returns `401 Unauthorized` if it is missing,
 **before** your handler runs. Checking that the credential is *valid* is your
-job:
+job. For `oauth2` and `openIdConnect` that includes checking the token's
+scopes against the ones the operation lists:
 
 ```rust,ignore
 {{#include ../../openapi-trait/examples/server.rs:impl}}

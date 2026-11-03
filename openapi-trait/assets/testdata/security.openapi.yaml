@@ -63,6 +63,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SessionPayload"
+  /oauth:
+    get:
+      operationId: getOauth
+      security:
+        - oauth: [read:things]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPayload"
+  /oidc:
+    get:
+      operationId: getOidc
+      security:
+        - oidc: []
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPayload"
 components:
   schemas:
     OkPayload:
@@ -104,3 +128,13 @@ components:
       type: apiKey
       in: cookie
       name: session
+    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://example.com/token
+          scopes:
+            read:things: read things
+    oidc:
+      type: openIdConnect
+      openIdConnectUrl: https://example.com/.well-known/openid-configuration
