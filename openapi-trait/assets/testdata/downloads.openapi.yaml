@@ -23,6 +23,7 @@ paths:
                 type: string
             ETag:
               description: Entity tag for caching
+              required: true
               schema:
                 type: string
           content:

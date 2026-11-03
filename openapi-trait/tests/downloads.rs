@@ -57,7 +57,7 @@ impl downloads_server::DownloadsServerApi for MockDownloads {
                 downloads_server::download_file::Status200 {
                     body,
                     content_disposition: Some("attachment; filename=\"report.pdf\"".to_string()),
-                    e_tag: Some("\"abc123\"".to_string()),
+                    e_tag: "\"abc123\"".to_string(),
                 },
             ))
         } else {
@@ -201,7 +201,8 @@ mod client_tests {
                     payload.content_disposition.as_deref(),
                     Some("attachment; filename=\"report.pdf\"")
                 );
-                assert_eq!(payload.e_tag.as_deref(), Some("\"abc123\""));
+                // A required string header (it used to fail type inference).
+                assert_eq!(payload.e_tag, "\"abc123\"");
             }
             downloads::download_file::Response::Status404 => panic!("expected 200 response"),
         }
