@@ -969,11 +969,7 @@ fn generate_param_enums(op: &OperationInfo) -> TokenStream {
         .map(|p| {
             let ident = p.enum_ident.as_ref().unwrap();
             let doc = doc_attr(&p.description);
-            let variant_idents: Vec<syn::Ident> = p
-                .enum_values
-                .iter()
-                .map(|v| format_ident!("{}", v.to_pascal_case()))
-                .collect();
+            let variant_idents = idents::enum_variant_idents(&p.enum_values);
             let display_arms = variant_idents
                 .iter()
                 .zip(&p.enum_values)

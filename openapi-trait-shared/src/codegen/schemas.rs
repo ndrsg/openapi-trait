@@ -1,7 +1,7 @@
 use heck::{ToPascalCase, ToSnakeCase};
 use openapiv3::{OpenAPI, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 
 use super::compositions::{generate_all_of, generate_any_of, generate_one_of};
 use super::types::{
@@ -53,7 +53,7 @@ fn generate_schema_item(
         ReferenceOr::Item(s) => s,
         ReferenceOr::Reference { reference } => {
             // Unusual: a component schema that is itself a $ref; just emit a type alias.
-            let ident = format_ident!("{}", name.to_pascal_case());
+            let ident = super::idents::schema_type_ident(name);
             let target = ref_to_ident(reference);
             return quote! { pub type #ident = #target; };
         }
@@ -91,7 +91,7 @@ fn generate_schema_item(
         }
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
-            let ident = format_ident!("{}", name.to_pascal_case());
+            let ident = super::idents::schema_type_ident(name);
             let inner = schema_to_rust_type_ctx(ref_or, true, Some(name), inline_types, models);
             let doc = doc_attr(&schema.schema_data.description);
             quote! {
@@ -104,18 +104,18 @@ fn generate_schema_item(
 
 /// Generate a string enum type from a schema.
 pub(crate) fn generate_string_enum(name: &str, schema: &Schema) -> TokenStream {
-    let ident = format_ident!("{}", name.to_pascal_case());
+    let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&schema.schema_data.description);
-    let variants = string_enum_values(schema)
+    let values = string_enum_values(schema);
+    let variants = super::idents::enum_variant_idents(&values)
         .into_iter()
-        .map(|v| {
-            let variant_ident = format_ident!("{}", v.to_pascal_case());
+        .zip(&values)
+        .map(|(variant_ident, v)| {
             if variant_ident == v {
                 quote! { #variant_ident }
             } else {
-                let rename = &v;
                 quote! {
-                    #[serde(rename = #rename)]
+                    #[serde(rename = #v)]
                     #variant_ident
                 }
             }
@@ -147,7 +147,7 @@ pub fn generate_object_struct(
     inline_types: &mut Vec<TokenStream>,
     models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name.to_pascal_case());
+    let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&schema.schema_data.description);
 
     // A pure-map object (no declared properties, only `additionalProperties`)

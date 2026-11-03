@@ -21,3 +21,35 @@ paths:
       operationId: list-pets
       responses:
         '200': { description: ok }
+  # KNOWN_ISSUES.md C3: query enum values that aren't identifiers.
+  /versions:
+    get:
+      operationId: listVersions
+      parameters:
+        - name: v
+          in: query
+          required: true
+          schema: { type: string, enum: ["1.0", "2.0", ""] }
+      responses:
+        '200': { description: ok }
+# KNOWN_ISSUES.md C3: enum values and schema names that don't map cleanly to
+# Rust identifiers.
+components:
+  schemas:
+    Version:
+      type: string
+      enum: ["1.0", "2.0", "+1", "", "Self", "self", "404", "super", "crate"]
+    Sort:
+      type: string
+      enum: ["created_at", "createdAt", "-created_at"]
+    2FAConfig:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        version: { $ref: '#/components/schemas/Version' }
+    Self:
+      type: object
+      properties:
+        second_factor: { $ref: '#/components/schemas/2FAConfig' }
+    type:
+      type: string

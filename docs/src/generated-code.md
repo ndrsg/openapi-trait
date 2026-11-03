@@ -21,7 +21,13 @@ items:
 - **Methods and fields** use snake_case (`getPet` → `get_pet`, `petId` →
   `pet_id`). The original name is kept with `#[serde(rename = "…")]`.
 - **Reserved words and invalid identifiers** are escaped, so `type` becomes
-  `r#type`.
+  `r#type`. Type names that can't be Rust identifiers get a `_` prefix
+  (`2FAConfig` → `_2faConfig`, `Self` → `_Self`).
+- **Enum variants** are the PascalCase of the value, with a `V` prefix when the
+  value starts with a digit or is a keyword (`"1.0"` → `V1_0`, `"self"` →
+  `VSelf`) and `Empty` for `""`. Values that map to the same name get a numeric
+  suffix (`created_at`, `createdAt` → `CreatedAt`, `CreatedAt2`). The wire value
+  is always kept with `#[serde(rename = "…")]`.
 - **Inline schemas** are lifted to the top level and named after where they
   appear:
   - a nested object or composition in a property becomes

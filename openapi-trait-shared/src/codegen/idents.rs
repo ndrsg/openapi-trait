@@ -150,9 +150,144 @@ pub fn keyword_safe_ident(name: &str) -> Ident {
     Ident::new(name, Span::call_site())
 }
 
+/// Make `candidate` (already case-converted) a legal non-keyword identifier.
+///
+/// - an empty candidate becomes `empty`;
+/// - a leading digit or a keyword (in practice `Self`, the only one reachable
+///   through `PascalCase`, and one that can't be raw) gets `prefix` prepended;
+/// - anything `syn` still rejects (exotic Unicode) is reduced to its ASCII
+///   alphanumerics, falling back to `empty`.
+///
+/// The results never put `_` next to a letter, so they don't trip the
+/// `non_camel_case_types` lint in user crates.
+fn sanitize_pascal(candidate: String, prefix: &str, empty: &str) -> Ident {
+    let fixup = |mut s: String| -> String {
+        if s.is_empty() {
+            return empty.to_owned();
+        }
+        if s.starts_with(|c: char| c.is_ascii_digit())
+            || NON_RAW_KEYWORDS.contains(&s.as_str())
+            || RAW_SAFE_KEYWORDS.contains(&s.as_str())
+        {
+            s.insert_str(0, prefix);
+        }
+        s
+    };
+    let s = fixup(candidate);
+    if let Ok(id) = syn::parse_str::<Ident>(&s) {
+        return id;
+    }
+    let ascii: String = s
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    syn::parse_str::<Ident>(&fixup(ascii)).unwrap_or_else(|_| Ident::new(empty, Span::call_site()))
+}
+
+/// Infallible `PascalCase` type identifier for a schema / security-scheme name
+/// or a type name synthesized from one (`{Parent}{Prop}`, …).
+///
+/// Ordinary names map exactly as `heck`'s `to_pascal_case` does; names that
+/// would not be legal identifiers are repaired instead of panicking
+/// (`2FAConfig` → `_2faConfig`, `Self` → `_Self`). Every definition *and*
+/// reference to a schema type must go through this so they agree.
+#[must_use]
+pub fn schema_type_ident(name: &str) -> Ident {
+    sanitize_pascal(name.to_pascal_case(), "_", "Unnamed")
+}
+
+/// `PascalCase` an enum wire value, keeping digit runs on either side of a
+/// separator apart (`1.0` → `1_0`, not `10`) so distinct versions stay
+/// distinct.
+fn pascal_enum_value(value: &str) -> String {
+    let mut out = String::new();
+    for segment in value
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|s| !s.is_empty())
+    {
+        let pascal = segment.to_pascal_case();
+        if out.ends_with(|c: char| c.is_ascii_digit())
+            && pascal.starts_with(|c: char| c.is_ascii_digit())
+        {
+            out.push('_');
+        }
+        out.push_str(&pascal);
+    }
+    out
+}
+
+/// Infallible, collision-free variant identifiers for a string enum's values,
+/// in the same order as `values`.
+///
+/// Values that don't make a legal identifier are repaired (`"1.0"` → `V1_0`,
+/// `""` → `Empty`, `"self"` → `VSelf`), and values that map to the same
+/// identifier get a numeric suffix (`created_at`, `createdAt` → `CreatedAt`,
+/// `CreatedAt2`). Callers keep a `#[serde(rename = "...")]` with the original
+/// value whenever the identifier differs from it.
+#[must_use]
+pub fn enum_variant_idents(values: &[String]) -> Vec<Ident> {
+    let mut used: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    values
+        .iter()
+        .map(|v| {
+            let base = sanitize_pascal(pascal_enum_value(v), "V", "Empty").to_string();
+            let mut candidate = base.clone();
+            let mut n = 2usize;
+            while !used.insert(candidate.clone()) {
+                candidate = format!("{base}{n}");
+                n += 1;
+            }
+            Ident::new(&candidate, Span::call_site())
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn variants(values: &[&str]) -> Vec<String> {
+        let owned: Vec<String> = values.iter().map(|s| (*s).to_owned()).collect();
+        enum_variant_idents(&owned)
+            .iter()
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn enum_variants_are_sanitized() {
+        assert_eq!(
+            variants(&["1.0", "2.0", "+1", "", "Self", "self", "404", "super", "crate"]),
+            ["V1_0", "V2_0", "V1", "Empty", "VSelf", "VSelf2", "V404", "Super", "Crate"]
+        );
+    }
+
+    #[test]
+    fn enum_variants_keep_existing_names() {
+        assert_eq!(
+            variants(&["available", "in-stock", "snake_case_value", "SHOUTY"]),
+            ["Available", "InStock", "SnakeCaseValue", "Shouty"]
+        );
+    }
+
+    #[test]
+    fn colliding_enum_variants_get_a_suffix() {
+        assert_eq!(
+            variants(&["created_at", "createdAt", "-created_at"]),
+            ["CreatedAt", "CreatedAt2", "CreatedAt3"]
+        );
+    }
+
+    #[test]
+    fn schema_type_idents_are_sanitized() {
+        assert_eq!(schema_type_ident("Pet").to_string(), "Pet");
+        assert_eq!(schema_type_ident("pet_store").to_string(), "PetStore");
+        assert_eq!(schema_type_ident("2FAConfig").to_string(), "_2faConfig");
+        assert_eq!(schema_type_ident("Self").to_string(), "_Self");
+        assert_eq!(schema_type_ident("self").to_string(), "_Self");
+        assert_eq!(schema_type_ident("type").to_string(), "Type");
+        assert_eq!(schema_type_ident("").to_string(), "Unnamed");
+    }
 
     #[test]
     fn keyword_method_becomes_raw_ident() {
