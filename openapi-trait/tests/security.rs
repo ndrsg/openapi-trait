@@ -78,6 +78,30 @@ impl sec_axum::SecAxumApi for MockServer {
             sec_axum::SessionPayload { session: auth.0 },
         ))
     }
+
+    async fn get_oauth(
+        &self,
+        _req: sec_axum::GetOauthRequest,
+        auth: sec_axum::Oauth,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sec_axum::GetOauthResponse, Self::Error> {
+        Ok(sec_axum::GetOauthResponse::Status200(
+            sec_axum::TokenPayload { token: auth.0 },
+        ))
+    }
+
+    async fn get_oidc(
+        &self,
+        _req: sec_axum::GetOidcRequest,
+        auth: sec_axum::Oidc,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sec_axum::GetOidcResponse, Self::Error> {
+        Ok(sec_axum::GetOidcResponse::Status200(
+            sec_axum::TokenPayload { token: auth.0 },
+        ))
+    }
 }
 
 async fn spawn_server() -> String {
@@ -180,6 +204,27 @@ async fn cookied_extracts_session() {
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(body["session"], "xyz");
+}
+
+#[tokio::test]
+async fn oauth2_and_oidc_require_a_bearer_token() {
+    let base = spawn_server().await;
+    let http = reqwest::Client::new();
+
+    for path in ["oauth", "oidc"] {
+        let resp = http.get(format!("{base}/{path}")).send().await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::UNAUTHORIZED, "{path}");
+
+        let resp = http
+            .get(format!("{base}/{path}"))
+            .header("Authorization", "Bearer tok")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "{path}");
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["token"], "tok", "{path}");
+    }
 }
 
 // ---- Client side: credential injection ----
@@ -288,5 +333,36 @@ async fn per_request_bearer_works_without_client_credential() {
         sec_client::GetAdminResponse::Status200(body) => {
             assert_eq!(body.token, "per-request-token");
         }
+    }
+}
+
+#[tokio::test]
+async fn client_sends_oauth2_and_oidc_tokens_as_bearer() {
+    let base = spawn_server().await;
+
+    let client = {
+        use sec_client::SecClientClientAuth as _;
+        DerivedClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base,
+            creds: sec_client::SecClientAuthState::default(),
+        }
+        .with_oauth("oauth-token")
+        .with_oidc("oidc-token")
+    };
+
+    match client
+        .get_oauth(sec_client::GetOauthRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetOauthResponse::Status200(body) => assert_eq!(body.token, "oauth-token"),
+    }
+    match client
+        .get_oidc(sec_client::GetOidcRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetOidcResponse::Status200(body) => assert_eq!(body.token, "oidc-token"),
     }
 }

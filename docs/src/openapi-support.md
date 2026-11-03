@@ -42,7 +42,7 @@ openapi-trait targets OpenAPI **3.0** documents in YAML or JSON.
 | `apiKey` in header, query or cookie | ✅ |
 | `http` bearer | ✅ |
 | `http` basic | ✅ |
-| `oauth2`, `openIdConnect` | recognised, but no code is generated |
+| `oauth2`, `openIdConnect` | ✅ handled like `http` bearer; scopes are not checked |
 
 See [Security](security.md) for details.
 

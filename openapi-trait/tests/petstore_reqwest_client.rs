@@ -29,7 +29,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
     async fn get_pet_by_id(
         &self,
         req: petstore_server::GetPetByIdRequest,
-        _auth: petstore_server::ApiKey,
+        _auth: petstore_server::GetPetByIdAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
@@ -52,6 +52,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
     async fn find_pets_by_status(
         &self,
         req: petstore_server::FindPetsByStatusRequest,
+        _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::FindPetsByStatusResponse, Self::Error> {
@@ -75,6 +76,7 @@ impl petstore_server::PetstoreServerApi for RichMockPetstore {
     async fn add_pet(
         &self,
         req: petstore_server::AddPetRequest,
+        _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::AddPetResponse, Self::Error> {
@@ -130,6 +132,7 @@ async fn generated_reqwest_client_handles_query_params() {
             creds: petstore::PetstoreAuthState::default(),
         }
         .with_api_key("k")
+        .with_petstore_auth("t")
     };
 
     let response = client
@@ -159,6 +162,7 @@ async fn generated_reqwest_client_handles_json_bodies() {
             creds: petstore::PetstoreAuthState::default(),
         }
         .with_api_key("k")
+        .with_petstore_auth("t")
     };
 
     let response = client
@@ -197,7 +201,7 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
     async fn get_pet_by_id(
         &self,
         req: petstore_server::GetPetByIdRequest,
-        _auth: petstore_server::ApiKey,
+        _auth: petstore_server::GetPetByIdAuth,
         _state: axum::extract::State<()>,
         headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::GetPetByIdResponse, Self::Error> {
@@ -225,6 +229,7 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
     async fn find_pets_by_status(
         &self,
         _req: petstore_server::FindPetsByStatusRequest,
+        _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::FindPetsByStatusResponse, Self::Error> {
@@ -234,6 +239,7 @@ impl petstore_server::PetstoreServerApi for RecordingPetstore {
     async fn add_pet(
         &self,
         req: petstore_server::AddPetRequest,
+        _auth: petstore_server::PetstoreAuth,
         _state: axum::extract::State<()>,
         _headers: axum::http::HeaderMap,
     ) -> Result<petstore_server::AddPetResponse, Self::Error> {

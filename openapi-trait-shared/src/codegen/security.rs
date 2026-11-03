@@ -4,10 +4,10 @@
 //!
 //! - `apiKey` schemes (`in: header | query | cookie`)
 //! - `http` schemes with `scheme: bearer` or `scheme: basic`
+//! - `oauth2` and `openIdConnect`, which carry an `Authorization: Bearer`
+//!   token and are handled like `http` bearer. Scopes are not checked.
 //!
-//! `oauth2` and `openIdConnect` are recognised at parse time and silently
-//! skipped — operations that reference them behave as if they had no security
-//! requirement so the rest of the spec still compiles. Multi-scheme `AND`
+//! Multi-scheme `AND`
 //! requirements (a single requirement object naming more than one scheme) emit
 //! a `compile_error!` because v0.1 only supports `OR` of single-scheme
 //! alternatives.
@@ -83,7 +83,11 @@ pub fn collect_schemes(openapi: &OpenAPI) -> Vec<SchemeInfo> {
                 "basic" => SchemeKind::HttpBasic,
                 _ => continue,
             },
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => continue,
+            // Both send the access token as `Authorization: Bearer <token>`.
+            // Validating the token, including its scopes, is the handler's job.
+            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => {
+                SchemeKind::HttpBearer
+            }
         };
         let ident = super::idents::schema_type_ident(name);
         let snake = name.to_snake_case();

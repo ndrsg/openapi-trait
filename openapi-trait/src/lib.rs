@@ -24,7 +24,7 @@
 //!     async fn get_pet_by_id(
 //!         &self,
 //!         req: petstore::GetPetByIdRequest,
-//!         _auth: petstore::ApiKey,
+//!         _auth: petstore::GetPetByIdAuth,
 //!         _state: axum::extract::State<AppState>,
 //!         _headers: axum::http::HeaderMap,
 //!     ) -> Result<petstore::GetPetByIdResponse, Self::Error> {
