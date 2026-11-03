@@ -333,7 +333,9 @@ fn build_operation_info(
         return None;
     }
 
-    // Collect parameters: path-level then operation-level (operation wins on name clash)
+    // Collect parameters: path-level then operation-level; `collect_params`
+    // lets an operation-level param override a path-level one with the same
+    // `(name, in)`.
     let mut all_params: Vec<&ReferenceOr<Parameter>> = Vec::new();
     all_params.extend(path_item.parameters.iter());
     all_params.extend(operation.parameters.iter());
@@ -382,22 +384,8 @@ fn collect_params(
     let mut query_params = Vec::new();
     let mut header_params = Vec::new();
 
-    for ref_or_param in all_params {
-        let param = match ref_or_param {
-            ReferenceOr::Item(p) => p,
-            ReferenceOr::Reference { reference } => {
-                // Try to resolve from components
-                if let Some(resolved) = resolve_param_ref(reference, openapi) {
-                    resolved
-                } else {
-                    diag.warn(format!(
-                        "operation `{operation_id}`: could not resolve parameter $ref `{reference}`; parameter skipped"
-                    ));
-                    continue;
-                }
-            }
-        };
-
+    let resolved = resolve_and_merge_params(all_params, operation_id, openapi, diag);
+    for param in resolved {
         let data = param.parameter_data_ref();
         let param_schema = param_schema(param, openapi);
 
@@ -534,6 +522,53 @@ fn query_serialization(param: &Parameter, param_schema: Option<&Schema>) -> Quer
         is_array,
         array_item_type,
     }
+}
+
+/// Resolve parameter `$ref`s (warning about and skipping unresolvable ones),
+/// then merge by `(name, in)`: per the `OpenAPI` spec a later (operation-level)
+/// parameter overrides an earlier (path-level) one with the same key. The
+/// overriding entry keeps the original's position.
+fn resolve_and_merge_params<'a>(
+    all_params: &[&'a ReferenceOr<Parameter>],
+    operation_id: &str,
+    openapi: &'a OpenAPI,
+    diag: &mut Diagnostics,
+) -> Vec<&'a Parameter> {
+    let mut resolved: Vec<&Parameter> = Vec::new();
+    for ref_or_param in all_params {
+        let param = match ref_or_param {
+            ReferenceOr::Item(p) => p,
+            ReferenceOr::Reference { reference } => {
+                if let Some(resolved) = resolve_param_ref(reference, openapi) {
+                    resolved
+                } else {
+                    diag.warn(format!(
+                        "operation `{operation_id}`: could not resolve parameter $ref `{reference}`; parameter skipped"
+                    ));
+                    continue;
+                }
+            }
+        };
+        let key = param_key(param);
+        if let Some(slot) = resolved.iter_mut().find(|p| param_key(p) == key) {
+            *slot = param;
+        } else {
+            resolved.push(param);
+        }
+    }
+    resolved
+}
+
+/// The `(name, in)` pair that uniquely identifies a parameter within an
+/// operation, per the `OpenAPI` spec.
+fn param_key(param: &Parameter) -> (&str, &'static str) {
+    let location = match param {
+        Parameter::Path { .. } => "path",
+        Parameter::Query { .. } => "query",
+        Parameter::Header { .. } => "header",
+        Parameter::Cookie { .. } => "cookie",
+    };
+    (param.parameter_data_ref().name.as_str(), location)
 }
 
 /// Resolve a `$ref` to a parameter from the components section.
@@ -1257,6 +1292,36 @@ paths:
         assert!(diag.errors.is_empty());
         assert_eq!(diag.warnings.len(), 1);
         assert!(diag.warnings[0].contains("status range `2XX`"));
+    }
+
+    #[test]
+    fn operation_param_overrides_path_item_param_with_same_name_and_location() {
+        let (ops, diag) = collect(
+            r#"
+openapi: 3.0.0
+info: { title: t, version: "1.0" }
+components:
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: integer } }
+paths:
+  /things/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: id, in: query, schema: { type: string } }
+    get:
+      operationId: getThing
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200': { description: ok }
+"#,
+        );
+        assert!(diag.errors.is_empty(), "{:?}", diag.errors);
+        let op = &ops[0];
+        assert_eq!(op.path_params.len(), 1);
+        assert_eq!(op.path_params[0].rust_type.to_string(), "i64");
+        // Same name, different location: kept as a separate param.
+        assert_eq!(op.query_params.len(), 1);
     }
 
     #[test]

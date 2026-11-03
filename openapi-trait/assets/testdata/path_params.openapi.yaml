@@ -1,4 +1,4 @@
-# Regression fixture for KNOWN_ISSUES.md S1 and C1: path parameters.
+# Regression fixture for KNOWN_ISSUES.md S1, C1 and C2: path parameters.
 openapi: 3.0.1
 info:
   title: path params
@@ -39,3 +39,16 @@ paths:
           description: ok
           content:
             application/json: { schema: { type: string } }
+  # C2: the same parameter at path-item and operation level; the operation wins.
+  /dup/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getDup
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: { schema: { type: integer } }
