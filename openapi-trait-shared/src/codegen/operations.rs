@@ -10,7 +10,9 @@ use quote::{format_ident, quote};
 use super::idents;
 use super::schemas::doc_attr;
 use super::security::{resolve_op_security, OpSecurity, SchemeInfo};
-use super::types::{is_string_enum, schema_to_rust_type, string_enum_values};
+use super::types::{
+    is_string_enum, non_null_schema_to_rust_type, schema_to_rust_type, string_enum_values,
+};
 
 /// All information about a single API operation needed by later codegen stages.
 #[derive(Debug)]
@@ -433,7 +435,7 @@ fn collect_params(
             quote! { #ei }
         } else if let Some(schema) = &param_schema {
             let ref_or = ReferenceOr::Item(schema.clone());
-            schema_to_rust_type(&ref_or, true)
+            non_null_schema_to_rust_type(&ref_or, true)
         } else {
             quote! { ::std::string::String }
         };
@@ -509,7 +511,7 @@ fn query_serialization(param: &Parameter, param_schema: Option<&Schema>) -> Quer
         Some(SchemaKind::Type(Type::Array(arr))) => {
             let item_ty = arr.items.as_ref().map_or_else(
                 || quote! { ::serde_json::Value },
-                |items| schema_to_rust_type(&items.clone().unbox(), true),
+                |items| non_null_schema_to_rust_type(&items.clone().unbox(), true),
             );
             (true, Some(item_ty))
         }
@@ -747,7 +749,7 @@ const fn classify_header_schema(ref_or: &ReferenceOr<Schema>) -> HeaderValueKind
 /// Map a response header schema to its Rust type.
 fn header_schema_to_rust(format: &ParameterSchemaOrContent, required: bool) -> TokenStream {
     match format {
-        ParameterSchemaOrContent::Schema(ref_or) => schema_to_rust_type(ref_or, required),
+        ParameterSchemaOrContent::Schema(ref_or) => non_null_schema_to_rust_type(ref_or, required),
         ParameterSchemaOrContent::Content(_) => {
             if required {
                 quote! { ::std::string::String }
