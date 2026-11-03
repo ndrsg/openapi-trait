@@ -411,26 +411,34 @@ fn collect_params(
             }
         };
 
-        let (is_enum, enum_ident, enum_values) =
-            if param_schema.as_ref().is_some_and(is_string_enum) {
-                let schema = param_schema.as_ref().expect("checked is_some_and above");
-                let name = format!(
-                    "{}{}Query",
-                    operation_id.to_pascal_case(),
-                    data.name.to_pascal_case()
-                );
-                let ident = match idents::type_ident(&name, operation_id) {
-                    Ok(id) => id,
-                    Err(msg) => {
-                        diag.error(format!("operation `{method} {path}`: {msg}"));
-                        return None;
-                    }
-                };
-                let vals = string_enum_values(schema);
-                (true, Some(ident), vals)
-            } else {
-                (false, None, vec![])
+        // Only path and query params get a dedicated enum type; header values
+        // are carried as plain strings and cookie params are skipped.
+        let enum_suffix = match param {
+            Parameter::Path { .. } => Some("Path"),
+            Parameter::Query { .. } => Some("Query"),
+            Parameter::Header { .. } | Parameter::Cookie { .. } => None,
+        };
+        let (is_enum, enum_ident, enum_values) = if let (Some(suffix), Some(schema)) = (
+            enum_suffix,
+            param_schema.as_ref().filter(|s| is_string_enum(s)),
+        ) {
+            let name = format!(
+                "{}{}{suffix}",
+                operation_id.to_pascal_case(),
+                data.name.to_pascal_case()
+            );
+            let ident = match idents::type_ident(&name, operation_id) {
+                Ok(id) => id,
+                Err(msg) => {
+                    diag.error(format!("operation `{method} {path}`: {msg}"));
+                    return None;
+                }
             };
+            let vals = string_enum_values(schema);
+            (true, Some(ident), vals)
+        } else {
+            (false, None, vec![])
+        };
 
         let rust_type = if is_enum {
             let ei = enum_ident.as_ref().unwrap();
@@ -903,30 +911,42 @@ pub fn generate_operation_types(ops: &[OperationInfo], binary: &BinaryBodyTypes)
 
 /// Generate all types for a single operation.
 fn generate_single_operation_types(op: &OperationInfo, binary: &BinaryBodyTypes) -> TokenStream {
-    let query_enums = generate_query_enums(op);
+    let param_enums = generate_param_enums(op);
     let request_struct = generate_request_struct(op, binary);
     let response_enum = generate_response_enum(op, binary);
     quote! {
-        #query_enums
+        #param_enums
         #request_struct
         #response_enum
     }
 }
 
-/// Generate enum types for query parameters with string enum schemas.
-fn generate_query_enums(op: &OperationInfo) -> TokenStream {
+/// Generate enum types for path and query parameters with string enum schemas.
+///
+/// Besides the serde derives, each enum gets a `Display` impl that renders the
+/// wire value, so it can be interpolated into a URL path.
+fn generate_param_enums(op: &OperationInfo) -> TokenStream {
     let enums: Vec<TokenStream> = op
-        .query_params
+        .path_params
         .iter()
+        .chain(op.query_params.iter())
         .filter(|p| p.is_enum)
         .map(|p| {
             let ident = p.enum_ident.as_ref().unwrap();
             let doc = doc_attr(&p.description);
-            let variants: Vec<TokenStream> = p
+            let variant_idents: Vec<syn::Ident> = p
                 .enum_values
                 .iter()
-                .map(|v| {
-                    let variant_ident = format_ident!("{}", v.to_pascal_case());
+                .map(|v| format_ident!("{}", v.to_pascal_case()))
+                .collect();
+            let display_arms = variant_idents
+                .iter()
+                .zip(&p.enum_values)
+                .map(|(variant_ident, v)| quote! { Self::#variant_ident => #v, });
+            let variants: Vec<TokenStream> = variant_idents
+                .iter()
+                .zip(&p.enum_values)
+                .map(|(variant_ident, v)| {
                     if variant_ident == v.as_str() {
                         quote! { #variant_ident }
                     } else {
@@ -949,6 +969,14 @@ fn generate_query_enums(op: &OperationInfo) -> TokenStream {
 
                 pub enum #ident {
                     #(#variants,)*
+                }
+
+                impl ::core::fmt::Display for #ident {
+                    fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                        f.write_str(match self {
+                            #(#display_arms)*
+                        })
+                    }
                 }
             }
         })

@@ -1,4 +1,4 @@
-# Regression fixture for KNOWN_ISSUES.md S1: path parameters.
+# Regression fixture for KNOWN_ISSUES.md S1 and C1: path parameters.
 openapi: 3.0.1
 info:
   title: path params
@@ -23,6 +23,17 @@ paths:
       parameters:
         - { name: slug, in: path, required: true, schema: { type: string } }
         - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: { schema: { type: string } }
+  # C1: a string-enum path parameter.
+  /things/{kind}:
+    get:
+      operationId: getThing
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [a, b, "x-y"] } }
       responses:
         '200':
           description: ok

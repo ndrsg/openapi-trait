@@ -1,4 +1,5 @@
-//! Regression tests for `KNOWN_ISSUES.md` S1 (path params bound in URL order).
+//! Regression tests for `KNOWN_ISSUES.md` S1 (path params bound in URL order)
+//! and C1 (string-enum path params get a generated type).
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/path_params.openapi.yaml")]
@@ -41,6 +42,20 @@ impl pp_server::PpServerApi for Server {
             req.slug
         )))
     }
+
+    async fn get_thing(
+        &self,
+        req: pp_server::GetThingRequest,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<pp_server::GetThingResponse, Self::Error> {
+        let kind = match req.kind {
+            pp_server::GetThingKindPath::A => "A",
+            pp_server::GetThingKindPath::B => "B",
+            pp_server::GetThingKindPath::XY => "XY",
+        };
+        Ok(pp_server::GetThingResponse::Status200(kind.to_owned()))
+    }
 }
 
 async fn spawn_server() -> String {
@@ -75,6 +90,22 @@ async fn reversed_path_params_with_different_types_parse() {
     assert_eq!(body, r#""id=7 slug=hello""#);
 }
 
+#[tokio::test]
+async fn enum_path_param_is_deserialized_by_wire_value() {
+    let base = spawn_server().await;
+    let (status, body) = get(format!("{base}/things/b")).await;
+    assert_eq!((status, body.as_str()), (200, r#""B""#));
+    let (status, body) = get(format!("{base}/things/x-y")).await;
+    assert_eq!((status, body.as_str()), (200, r#""XY""#));
+    let (status, _) = get(format!("{base}/things/nope")).await;
+    assert_eq!(status, 400);
+}
+
+#[test]
+fn enum_path_param_displays_its_wire_value() {
+    assert_eq!(pp_server::GetThingKindPath::XY.to_string(), "x-y");
+}
+
 #[cfg(feature = "reqwest-client")]
 mod client {
     use super::{pp_client, spawn_server};
@@ -89,11 +120,22 @@ mod client {
     }
 
     #[tokio::test]
-    async fn client_round_trips_reordered_path_params() {
+    async fn client_round_trips_enum_and_reordered_path_params() {
         let client = Client {
             http: ::reqwest::Client::new(),
             base_url: spawn_server().await,
         };
+
+        let resp = client
+            .get_thing(
+                pp_client::GetThingRequest {
+                    kind: pp_client::GetThingKindPath::B,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(resp, pp_client::GetThingResponse::Status200(ref s) if s == "B"));
 
         let resp = client
             .get_swapped(
