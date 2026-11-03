@@ -1,10 +1,9 @@
-use heck::ToPascalCase;
 use openapiv3::{
     AdditionalProperties, IntegerFormat, NumberFormat, ObjectType, ReferenceOr, Schema, SchemaKind,
     StringFormat, StringType, Type, VariantOrUnknownOrEmpty,
 };
 use proc_macro2::TokenStream;
-use quote::{format_ident, quote};
+use quote::quote;
 
 /// Map an `OpenAPI` `Schema` (or `$ref`) to a Rust type `TokenStream`.
 ///
@@ -65,7 +64,7 @@ fn ref_or_to_inner_type_ctx(
 pub fn ref_to_ident(reference: &str) -> TokenStream {
     // "#/components/schemas/Foo" -> Foo
     let name = reference.rsplit('/').next().unwrap_or(reference);
-    let ident = format_ident!("{}", name.to_pascal_case());
+    let ident = super::idents::schema_type_ident(name);
     quote! { #ident }
 }
 
@@ -138,7 +137,7 @@ fn synthesize_inline_string_enum(
         |name| {
             let tokens = super::schemas::generate_string_enum(name, schema);
             inline_types.push(tokens);
-            let ident = format_ident!("{}", name.to_pascal_case());
+            let ident = super::idents::schema_type_ident(name);
             quote! { #ident }
         },
     )
@@ -157,7 +156,7 @@ fn synthesize_inline_composition(
         |name| {
             let tokens = generate(name, inline_types);
             inline_types.push(tokens);
-            let ident = format_ident!("{}", name.to_pascal_case());
+            let ident = super::idents::schema_type_ident(name);
             quote! { #ident }
         },
     )

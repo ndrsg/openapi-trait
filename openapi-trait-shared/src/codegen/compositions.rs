@@ -17,7 +17,6 @@
 //! alongside the explicit `components/schemas` items so all generated types
 //! live at module scope.
 
-use heck::ToPascalCase;
 use openapiv3::{Discriminator, ReferenceOr, Schema, SchemaKind, Type};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
@@ -78,7 +77,7 @@ pub fn generate_all_of(
     inline_types: &mut Vec<TokenStream>,
     models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name.to_pascal_case());
+    let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&description.cloned());
 
     let mut fields: Vec<TokenStream> = Vec::new();
@@ -149,7 +148,7 @@ fn generate_enum(
     inline_types: &mut Vec<TokenStream>,
     models: &std::collections::BTreeSet<String>,
 ) -> TokenStream {
-    let ident = format_ident!("{}", name.to_pascal_case());
+    let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&description.cloned());
 
     let serde_attr = discriminator.map_or_else(
@@ -191,7 +190,7 @@ fn build_enum_variant(
     match branch {
         ReferenceOr::Reference { reference } => {
             let target_name = reference.rsplit('/').next().unwrap_or(reference);
-            let variant_ident = format_ident!("{}", target_name.to_pascal_case());
+            let variant_ident = super::idents::schema_type_ident(target_name);
             let ty = ref_to_ident(reference);
             // For tagged enums the rename governs the discriminator value on
             // the wire; for untagged enums the variant name is structural and

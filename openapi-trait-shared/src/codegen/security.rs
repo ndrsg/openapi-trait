@@ -85,7 +85,7 @@ pub fn collect_schemes(openapi: &OpenAPI) -> Vec<SchemeInfo> {
             },
             SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIDConnect { .. } => continue,
         };
-        let ident = format_ident!("{}", name.to_pascal_case());
+        let ident = super::idents::schema_type_ident(name);
         let snake = name.to_snake_case();
         out.push(SchemeInfo {
             name: name.clone(),
