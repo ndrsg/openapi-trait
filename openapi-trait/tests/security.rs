@@ -102,6 +102,36 @@ impl sec_axum::SecAxumApi for MockServer {
             sec_axum::TokenPayload { token: auth.0 },
         ))
     }
+
+    async fn get_maybe(
+        &self,
+        _req: sec_axum::GetMaybeRequest,
+        auth: Option<sec_axum::BearerAuth>,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sec_axum::GetMaybeResponse, Self::Error> {
+        let kind = auth.map_or_else(|| "anonymous".to_owned(), |b| format!("bearer:{}", b.0));
+        Ok(sec_axum::GetMaybeResponse::Status200(
+            sec_axum::KindPayload { kind },
+        ))
+    }
+
+    async fn get_maybe_flex(
+        &self,
+        _req: sec_axum::GetMaybeFlexRequest,
+        auth: Option<sec_axum::GetMaybeFlexAuth>,
+        _state: axum::extract::State<()>,
+        _headers: axum::http::HeaderMap,
+    ) -> Result<sec_axum::GetMaybeFlexResponse, Self::Error> {
+        let kind = match auth {
+            None => "anonymous".to_owned(),
+            Some(sec_axum::GetMaybeFlexAuth::BearerAuth(b)) => format!("bearer:{}", b.0),
+            Some(sec_axum::GetMaybeFlexAuth::BasicAuth(b)) => format!("basic:{}", b.username),
+        };
+        Ok(sec_axum::GetMaybeFlexResponse::Status200(
+            sec_axum::KindPayload { kind },
+        ))
+    }
 }
 
 async fn spawn_server() -> String {
@@ -225,6 +255,37 @@ async fn oauth2_and_oidc_require_a_bearer_token() {
         let body: serde_json::Value = resp.json().await.unwrap();
         assert_eq!(body["token"], "tok", "{path}");
     }
+}
+
+#[tokio::test]
+async fn optional_auth_allows_anonymous_requests() {
+    let base = spawn_server().await;
+    let http = reqwest::Client::new();
+
+    for path in ["maybe", "maybe-flex"] {
+        let resp = http.get(format!("{base}/{path}")).send().await.unwrap();
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "{path}");
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["kind"], "anonymous", "{path}");
+
+        let resp = http
+            .get(format!("{base}/{path}"))
+            .header("Authorization", "Bearer tok")
+            .send()
+            .await
+            .unwrap();
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["kind"], "bearer:tok", "{path}");
+    }
+
+    let resp = http
+        .get(format!("{base}/maybe-flex"))
+        .header("Authorization", "Basic dTpw")
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(body["kind"], "basic:u");
 }
 
 // ---- Client side: credential injection ----
@@ -364,5 +425,49 @@ async fn client_sends_oauth2_and_oidc_tokens_as_bearer() {
         .unwrap()
     {
         sec_client::GetOidcResponse::Status200(body) => assert_eq!(body.token, "oidc-token"),
+    }
+}
+
+#[tokio::test]
+async fn client_calls_optional_auth_operations_with_and_without_credentials() {
+    let base = spawn_server().await;
+
+    let anonymous = DerivedClient {
+        http: openapi_trait::reqwest::Client::new(),
+        endpoint: base.clone(),
+        creds: sec_client::SecClientAuthState::default(),
+    };
+    match anonymous
+        .get_maybe(sec_client::GetMaybeRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetMaybeResponse::Status200(body) => assert_eq!(body.kind, "anonymous"),
+    }
+    match anonymous
+        .get_maybe_flex(sec_client::GetMaybeFlexRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetMaybeFlexResponse::Status200(body) => assert_eq!(body.kind, "anonymous"),
+    }
+
+    let authed = {
+        use sec_client::SecClientClientAuth as _;
+        anonymous.with_bearer_auth("tok")
+    };
+    match authed
+        .get_maybe(sec_client::GetMaybeRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetMaybeResponse::Status200(body) => assert_eq!(body.kind, "bearer:tok"),
+    }
+    match authed
+        .get_maybe_flex(sec_client::GetMaybeFlexRequest {}, None)
+        .await
+        .unwrap()
+    {
+        sec_client::GetMaybeFlexResponse::Status200(body) => assert_eq!(body.kind, "bearer:tok"),
     }
 }

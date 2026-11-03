@@ -450,19 +450,32 @@ fn build_auth_extractor(op: &OperationInfo, alts: &[&SchemeInfo]) -> (TokenStrea
     let scheme_names: Vec<&str> = op.auth.alternatives.iter().map(String::as_str).collect();
     let scheme_label = scheme_names.join(",");
 
+    // Required auth unwraps the extracted `Option` or returns 401; optional
+    // auth (`security: [{}, …]`) hands the `Option` to the handler.
+    let unwrap_or_401 = |extracted: TokenStream| {
+        if op.auth.optional {
+            quote! { let auth = #extracted; }
+        } else {
+            quote! {
+                let auth = match #extracted {
+                    ::core::option::Option::Some(a) => a,
+                    ::core::option::Option::None => {
+                        let msg = ::std::format!("missing credentials for scheme `{}`", #scheme_label);
+                        return (::axum::http::StatusCode::UNAUTHORIZED, msg).into_response();
+                    }
+                };
+            }
+        }
+    };
+
     if alts.len() == 1 {
         let scheme = alts[0];
         let extract = extract_scheme_expr(scheme);
         let ty = &scheme.ident;
+        let bind = unwrap_or_401(quote! { __extracted });
         let stmts = quote! {
             let __extracted: ::core::option::Option<#ty> = #extract;
-            let auth = match __extracted {
-                ::core::option::Option::Some(a) => a,
-                ::core::option::Option::None => {
-                    let msg = ::std::format!("missing credentials for scheme `{}`", #scheme_label);
-                    return (::axum::http::StatusCode::UNAUTHORIZED, msg).into_response();
-                }
-            };
+            #bind
         };
         return (stmts, quote! { auth, });
     }
@@ -484,16 +497,11 @@ fn build_auth_extractor(op: &OperationInfo, alts: &[&SchemeInfo]) -> (TokenStrea
         })
         .collect();
 
+    let bind = unwrap_or_401(quote! { __auth });
     let stmts = quote! {
         let mut __auth: ::core::option::Option<#enum_ident> = ::core::option::Option::None;
         #(#try_arms)*
-        let auth = match __auth {
-            ::core::option::Option::Some(a) => a,
-            ::core::option::Option::None => {
-                let msg = ::std::format!("missing credentials for scheme `{}`", #scheme_label);
-                return (::axum::http::StatusCode::UNAUTHORIZED, msg).into_response();
-            }
-        };
+        #bind
     };
     (stmts, quote! { auth, })
 }

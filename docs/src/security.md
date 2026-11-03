@@ -18,6 +18,10 @@ These rules decide which operations require credentials:
   spec).
 - If an operation lists several alternatives (an OR), the macro generates an
   `{OperationId}Auth` enum with one variant per scheme.
+- An empty requirement (`security: [{}, {bearerAuth: []}]`) makes auth
+  optional: the server passes `Option<…>` to the handler, with `None` for an
+  anonymous request, instead of returning 401, and the client sends a
+  credential if one is configured but doesn't fail without one.
 
 ## Server side
 
