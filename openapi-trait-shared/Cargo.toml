@@ -16,7 +16,7 @@ categories.workspace = true
 proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
-prettyplease = "0.2"
+prettyplease = "0.3"
 oas3 = "0.22"
 # `preserve_order` keeps the document order of properties, which is the order
 # of the generated struct fields.
