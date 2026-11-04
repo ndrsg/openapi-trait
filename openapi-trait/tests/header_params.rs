@@ -1,8 +1,7 @@
-//! Regression tests for `KNOWN_ISSUES.md` D3: header parameters used to be
-//! `String` whatever their schema. They now get the schema's Rust type (a
-//! string enum gets an `{Param}Header` enum). The server parses each value
-//! like a query scalar and returns 400 when it doesn't parse; arrays use the
-//! `simple` style (`a,b,c`).
+//! Regression tests: header parameters used to be `String` whatever their
+//! schema. They now get the schema's Rust type (a string enum gets an
+//! `{Param}Header` enum). The server parses each value like a query scalar and
+//! returns 400 when it doesn't parse; arrays use the `simple` style (`a,b,c`).
 #![cfg(feature = "reqwest-client")]
 
 #[openapi_trait::axum("assets/testdata/header_params.openapi.yaml")]

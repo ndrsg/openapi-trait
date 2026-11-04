@@ -1,6 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` S1 (path params bound in URL order),
-//! C1 (string-enum path params get a generated type) and C2 (an operation-level
-//! param overrides a path-level one with the same name and location).
+//! Regression tests for path parameters: they are bound in URL order,
+//! string-enum path params get a generated type, and an operation-level param
+//! overrides a path-level one with the same name and location.
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/path_params.openapi.yaml")]

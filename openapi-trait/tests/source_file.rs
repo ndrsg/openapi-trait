@@ -120,10 +120,10 @@ fn explicit_dir_is_relative_to_manifest() {
     assert_generated_header(&files[0]);
 }
 
-/// Regression test for `KNOWN_ISSUES.md` D5: generated code reaches `serde`
-/// and `serde_json` only through the facade's re-exports, so users don't need
-/// them as dependencies. (Integration tests see the facade's own dependencies,
-/// so compiling alone can't catch a bare `::serde` path.)
+/// Regression test: generated code reaches `serde` and `serde_json` only
+/// through the facade's re-exports, so users don't need them as dependencies.
+/// (Integration tests see the facade's own dependencies, so compiling alone
+/// can't catch a bare `::serde` path.)
 #[test]
 fn generated_code_uses_reexported_serde() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));

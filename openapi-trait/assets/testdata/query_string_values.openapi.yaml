@@ -1,5 +1,5 @@
 # String query and header values must arrive exactly as sent, even when they
-# look like JSON (S4).
+# look like JSON.
 openapi: 3.0.3
 info: { title: query string values, version: "1.0" }
 paths:

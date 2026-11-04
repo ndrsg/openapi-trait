@@ -1,5 +1,4 @@
-# Regression fixture for KNOWN_ISSUES.md S2 (uncommon status codes) and S3
-# (optional request bodies).
+# Regression fixture for uncommon status codes and optional request bodies.
 openapi: 3.0.1
 info:
   title: status and body

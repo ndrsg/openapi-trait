@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md C8: JSON media types other than
-# plain `application/json` were dropped without a warning.
+# Regression fixture: JSON media types other than plain `application/json` were
+# dropped without a warning.
 openapi: 3.0.1
 info:
   title: json media types

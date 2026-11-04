@@ -1,7 +1,7 @@
-//! Regression tests for `KNOWN_ISSUES.md` D1: the `default` response used to
-//! be `Default(String)` and was always sent as 500. It is now
-//! `Default { status, body, <headers> }`, typed like a numbered response. The
-//! server sends `status`; the client fills it from any undeclared status.
+//! Regression tests: the `default` response used to be `Default(String)` and
+//! was always sent as 500. It is now `Default { status, body, <headers> }`,
+//! typed like a numbered response. The server sends `status`; the client fills
+//! it from any undeclared status.
 #![cfg(feature = "reqwest-client")]
 
 use openapi_trait::http::StatusCode;

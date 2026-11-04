@@ -1,10 +1,10 @@
-# Regression fixture for KNOWN_ISSUES.md S1, C1 and C2: path parameters.
+# Regression fixture for path parameters.
 openapi: 3.0.1
 info:
   title: path params
   version: 0.0.1
 paths:
-  # S1: params declared in the reverse of their URL order.
+  # Params declared in the reverse of their URL order.
   /swapped/{a}/{b}:
     get:
       operationId: getSwapped
@@ -16,7 +16,7 @@ paths:
           description: ok
           content:
             application/json: { schema: { type: string } }
-  # S1: reversed, with differing types.
+  # Reversed, with differing types.
   /typed/{id}/{slug}:
     get:
       operationId: getTyped
@@ -28,7 +28,7 @@ paths:
           description: ok
           content:
             application/json: { schema: { type: string } }
-  # C1: a string-enum path parameter.
+  # A string-enum path parameter.
   /things/{kind}:
     get:
       operationId: getThing
@@ -39,7 +39,7 @@ paths:
           description: ok
           content:
             application/json: { schema: { type: string } }
-  # C2: the same parameter at path-item and operation level; the operation wins.
+  # The same parameter at path-item and operation level; the operation wins.
   /dup/{id}:
     parameters:
       - { name: id, in: path, required: true, schema: { type: string } }

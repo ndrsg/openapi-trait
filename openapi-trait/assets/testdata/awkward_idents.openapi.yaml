@@ -21,7 +21,7 @@ paths:
       operationId: list-pets
       responses:
         '200': { description: ok }
-  # KNOWN_ISSUES.md C3: query enum values that aren't identifiers.
+  # Query enum values that aren't identifiers.
   /versions:
     get:
       operationId: listVersions
@@ -32,8 +32,7 @@ paths:
           schema: { type: string, enum: ["1.0", "2.0", ""] }
       responses:
         '200': { description: ok }
-# KNOWN_ISSUES.md C3: enum values and schema names that don't map cleanly to
-# Rust identifiers.
+# Enum values and schema names that don't map cleanly to Rust identifiers.
 components:
   schemas:
     Version:

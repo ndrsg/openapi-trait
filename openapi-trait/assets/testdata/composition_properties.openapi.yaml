@@ -1,4 +1,4 @@
-# A schema's own `properties` next to `oneOf` / `allOf` / `anyOf` (C9).
+# A schema's own `properties` next to `oneOf` / `allOf` / `anyOf`.
 openapi: 3.0.3
 info: { title: composition properties, version: "1.0" }
 paths:

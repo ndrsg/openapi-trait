@@ -1,6 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` D6: generated types derive
-//! `PartialEq`, so they can be compared in tests. String enums (component
-//! schemas and parameter enums) also derive `Eq`, `Hash` and `Copy`.
+//! Regression tests: generated types derive `PartialEq`, so they can be
+//! compared in tests. String enums (component schemas and parameter enums) also
+//! derive `Eq`, `Hash` and `Copy`.
 #![allow(missing_docs)]
 
 use std::collections::HashSet;

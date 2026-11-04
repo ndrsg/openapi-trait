@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md D3: header parameters get the Rust
-# type of their schema instead of always `String`.
+# Regression fixture: header parameters get the Rust type of their schema
+# instead of always `String`.
 openapi: 3.0.3
 info:
   title: Header params

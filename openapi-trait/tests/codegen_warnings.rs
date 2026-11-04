@@ -1,4 +1,4 @@
-//! Codegen warnings are reported as compiler warnings (D4).
+//! Codegen warnings are reported as compiler warnings.
 //!
 //! The spec makes both macros warn. Each warning is a `deprecated` lint, so
 //! the `expect` below is fulfilled; if the warnings went missing, the

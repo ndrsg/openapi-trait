@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md D2: inline request and response body
-# schemas get generated types instead of `serde_json::Value`.
+# Regression fixture: inline request and response body schemas get generated
+# types instead of `serde_json::Value`.
 openapi: 3.0.1
 info:
   title: inline_bodies

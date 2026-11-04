@@ -1,7 +1,7 @@
-//! Regression tests for `KNOWN_ISSUES.md` H5: `OpenAPI` 3.1 documents are
-//! supported. `type` lists with `"null"`, `oneOf` / `anyOf` with a
-//! `{type: "null"}` branch, `const`, numeric `exclusiveMinimum` /
-//! `exclusiveMaximum`, and `security: []` on an operation are all honored.
+//! Regression tests: `OpenAPI` 3.1 documents are supported. `type` lists with
+//! `"null"`, `oneOf` / `anyOf` with a `{type: "null"}` branch, `const`, numeric
+//! `exclusiveMinimum` / `exclusiveMaximum`, and `security: []` on an operation
+//! are all honored.
 #![cfg(feature = "reqwest-client")]
 
 #[openapi_trait::axum("assets/testdata/openapi31.openapi.yaml")]

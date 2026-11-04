@@ -1,6 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` C6 and C7: `nullable: true` must turn
-//! the generated type into `Option<T>`, even for required fields, and optional
-//! fields that are `None` must be left out instead of sent as `null`.
+//! Regression tests: `nullable: true` must turn the generated type into
+//! `Option<T>`, even for required fields, and optional fields that are `None`
+//! must be left out instead of sent as `null`.
 
 #[openapi_trait::axum("assets/testdata/nullable.openapi.yaml")]
 pub mod example {}

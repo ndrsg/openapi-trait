@@ -84,7 +84,7 @@ async fn raw_keyword_method_is_callable() {
     assert!(matches!(resp, awk_client::list_pets::Response::Status200));
 }
 
-// ---- `KNOWN_ISSUES.md` C3: enum values / schema names that aren't identifiers ----
+// ---- Enum values / schema names that aren't identifiers ----
 
 /// Serialize `value`, check the wire form, and deserialize it back.
 fn round_trip<T>(value: &T, wire: &str)

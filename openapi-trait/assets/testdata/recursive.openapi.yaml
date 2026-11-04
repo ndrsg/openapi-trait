@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md C4: recursive schemas must get a
-# finite size (`Box<T>` on the edge that closes a cycle).
+# Regression fixture: recursive schemas must get a finite size (`Box<T>` on the
+# edge that closes a cycle).
 openapi: 3.0.1
 info:
   title: recursive

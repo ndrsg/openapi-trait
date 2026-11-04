@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md C6 (`nullable: true`) and C7
-# (optional fields serialized as `null`).
+# Regression fixture for `nullable: true` and for optional fields, which must be
+# left out instead of serialized as `null`.
 openapi: 3.0.1
 info:
   title: nullable

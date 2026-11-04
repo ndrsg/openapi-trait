@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md D1: the `default` response keeps its
-# body type and headers, and carries the status code it is sent with.
+# Regression fixture: the `default` response keeps its body type and headers,
+# and carries the status code it is sent with.
 openapi: 3.0.3
 info:
   title: Default response

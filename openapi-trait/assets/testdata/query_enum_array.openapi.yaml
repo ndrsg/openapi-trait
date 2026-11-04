@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md D2 (parameters): the inline enum
-# items of an array query parameter get a generated enum instead of `String`.
+# Regression fixture: the inline enum items of an array query parameter get a
+# generated enum instead of `String`.
 openapi: 3.0.3
 info:
   title: Query enum array

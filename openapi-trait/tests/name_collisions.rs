@@ -1,7 +1,7 @@
-//! Regression tests for `KNOWN_ISSUES.md` C5 and the `{Op}Request` clash:
-//! generated types used to share one namespace, so a `CreateThingRequest`
-//! schema next to operation `createThing`, or an inline `Person.address` next
-//! to a `PersonAddress` schema, defined a name twice.
+//! Regression tests for type name clashes: generated types used to share one
+//! namespace, so a `CreateThingRequest` schema next to operation `createThing`,
+//! or an inline `Person.address` next to a `PersonAddress` schema, defined a
+//! name twice.
 //!
 //! Operation types now live in a module per operation, and a type synthesized
 //! for an inline schema gets a numeric suffix when its name is taken.

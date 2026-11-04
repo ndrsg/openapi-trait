@@ -1,7 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` D2 (parameters): the inline enum
-//! items of an array query parameter used to be `String`. They now get an
-//! `{Op}{Param}Query` enum, like a scalar query enum, which both the client
-//! and the server encode as the wire value.
+//! Regression tests: the inline enum items of an array query parameter used to
+//! be `String`. They now get an `{Op}{Param}Query` enum, like a scalar query
+//! enum, which both the client and the server encode as the wire value.
 #![cfg(feature = "reqwest-client")]
 
 #[openapi_trait::axum("assets/testdata/query_enum_array.openapi.yaml")]

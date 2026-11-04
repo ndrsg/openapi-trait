@@ -1,5 +1,5 @@
 //! String query and header values arrive exactly as sent, even when they look
-//! like JSON (S4). Numbers and enums behind a `$ref` still parse.
+//! like JSON. Numbers and enums behind a `$ref` still parse.
 
 #[openapi_trait::axum("assets/testdata/query_string_values.openapi.yaml")]
 mod m {}

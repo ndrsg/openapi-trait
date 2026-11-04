@@ -1,7 +1,6 @@
-# Regression fixture for KNOWN_ISSUES.md C5: type names must not collide.
-# Names synthesized for inline schemas get a numeric suffix when a component
-# schema already has them; operation types live in their own module, so a
-# schema can share their name.
+# Regression fixture: type names must not collide. Names synthesized for inline
+# schemas get a numeric suffix when a component schema already has them;
+# operation types live in their own module, so a schema can share their name.
 openapi: 3.0.1
 info:
   title: name_collisions

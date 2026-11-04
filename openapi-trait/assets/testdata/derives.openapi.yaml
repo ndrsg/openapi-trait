@@ -1,5 +1,5 @@
-# Regression fixture for KNOWN_ISSUES.md D6: generated types derive
-# `PartialEq`, and string enums also derive `Eq`, `Hash` and `Copy`.
+# Regression fixture: generated types derive `PartialEq`, and string enums also
+# derive `Eq`, `Hash` and `Copy`.
 openapi: 3.0.3
 info:
   title: Derives

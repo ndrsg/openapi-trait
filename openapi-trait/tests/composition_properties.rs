@@ -1,5 +1,4 @@
-//! A schema's own `properties` next to `oneOf` / `allOf` / `anyOf` are kept
-//! (C9).
+//! A schema's own `properties` next to `oneOf` / `allOf` / `anyOf` are kept.
 
 use serde_json::json;
 

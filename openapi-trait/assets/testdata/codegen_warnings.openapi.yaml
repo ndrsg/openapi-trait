@@ -1,5 +1,5 @@
-# Constructs the codegen skips with a warning (D4): a cookie parameter and a
-# response status range.
+# Constructs the codegen skips with a warning: a cookie parameter and a response
+# status range.
 openapi: 3.0.0
 info: { title: t, version: "1.0" }
 paths:

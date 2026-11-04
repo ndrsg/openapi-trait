@@ -1,6 +1,5 @@
-//! Regression tests for `KNOWN_ISSUES.md` S2 (status codes outside the old
-//! hard-coded table were sent as 500) and S3 (optional request bodies were
-//! required in practice).
+//! Regression tests: status codes outside an old hard-coded table were sent as
+//! 500, and optional request bodies were required in practice.
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/status_and_body.openapi.yaml")]

@@ -1,6 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` C4: recursive schemas used to fail
-//! with "recursive type has infinite size". The edge that closes a cycle is
-//! now a `Box<T>`, which serde treats transparently.
+//! Regression tests: recursive schemas used to fail with "recursive type has
+//! infinite size". The edge that closes a cycle is now a `Box<T>`, which serde
+//! treats transparently.
 
 #[openapi_trait::axum("assets/testdata/recursive.openapi.yaml")]
 pub mod example {}

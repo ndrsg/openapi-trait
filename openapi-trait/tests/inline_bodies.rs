@@ -1,6 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` D2: inline request and response body
-//! schemas used to become `serde_json::Value`. They now get generated types
-//! named `Body` and `Status{code}Body` in the operation's module.
+//! Regression tests: inline request and response body schemas used to become
+//! `serde_json::Value`. They now get generated types named `Body` and
+//! `Status{code}Body` in the operation's module.
 #![cfg(feature = "reqwest-client")]
 
 #[openapi_trait::axum("assets/testdata/inline_bodies.openapi.yaml")]

@@ -1,7 +1,6 @@
-//! Regression tests for `KNOWN_ISSUES.md` C8: request and response bodies with
-//! a JSON media type other than `application/json` (`+json` suffixes,
-//! `charset` parameters) are typed, and sent with their declared
-//! `Content-Type`.
+//! Regression tests: request and response bodies with a JSON media type other
+//! than `application/json` (`+json` suffixes, `charset` parameters) are typed,
+//! and sent with their declared `Content-Type`.
 #![cfg(feature = "reqwest-client")]
 
 #[openapi_trait::axum("assets/testdata/json_media_types.openapi.yaml")]
