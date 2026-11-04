@@ -32,10 +32,16 @@ created, so Git ignores it without any setup. A directory you choose with
 `source_file = "dir"` gets no `.gitignore`; add it to your own `.gitignore`.
 
 Files are named `<module>.<backend>.<hash>.rs`, for example
-`pets.axum.c1bb924c.rs`. The hash comes from the spec path, so modules with the
-same name but different specs don't overwrite each other. Each file starts with
-an `// @generated` header. Editing the file has no effect because it is
-rewritten on every build. Change the spec instead.
+`pets.axum.c1bb924c.rs`. The hash comes from the spec's path relative to the
+output directory, so modules with the same name but different specs don't
+overwrite each other, and the name stays the same when the project is moved or
+checked out somewhere else. Each file starts with an `// @generated` header.
+Editing the file has no effect because it is rewritten on every build. Change
+the spec instead.
+
+Files are never deleted. After you rename a module or move its spec, the old
+file stays behind, unused. You can delete it, or the whole directory, at any
+time: the next build writes what it needs.
 
 The file is rewritten only when its content changes. Builds don't touch it
 otherwise, so neither Cargo nor rust-analyzer re-checks without reason.
