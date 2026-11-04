@@ -34,7 +34,7 @@ direct dependency (see [Validation](validation.md)).
 
 ## Minimum Rust version
 
-Rust **1.87**.
+Rust **1.89**.
 
 ## Changelog
 
