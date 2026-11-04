@@ -62,8 +62,8 @@ otherwise, so neither Cargo nor rust-analyzer re-checks without reason.
 - **Behaviour is unchanged otherwise.** The generated code is identical, and
   without `source_file` nothing is written to disk.
 - **Write failures don't stop the build.** If the file can't be written, for
-  example on a read-only file system, the macro prints a warning and falls back
-  to inline code. Go-to-definition then lands on the attribute again.
+  example on a read-only file system, the macro emits a compiler warning and
+  falls back to inline code. Go-to-definition then lands on the attribute again.
 - **Compared with `OPENAPI_TRAIT_DEBUG`:** the [debug dump](debugging.md) is a
   one-off copy for reading. The compiler never uses it. `source_file` produces
   the code that is actually compiled, and it stays up to date.

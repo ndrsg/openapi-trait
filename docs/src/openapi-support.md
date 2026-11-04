@@ -4,6 +4,33 @@ openapi-trait reads OpenAPI **3.0** and **3.1** documents in YAML or JSON.
 Swagger (OpenAPI 2.0) documents are rejected with a compile error; convert them
 to OpenAPI 3 first.
 
+## Warnings and errors
+
+When the macro can't represent part of a spec, it tells you at compile time,
+pointing at the spec path in the attribute:
+
+- **Errors** stop the build. They cover anything that would make the generated
+  code wrong, such as a missing `operationId` or an operation that requires an
+  unsupported security scheme.
+- **Warnings** cover things that are skipped while the rest still works, such
+  as a cookie parameter or a `2XX` response range. They are ordinary compiler
+  warnings, so cargo, rust-analyzer and cached builds all show them.
+
+Stable Rust has no way for a macro to emit its own warnings, so each one is
+reported through the `deprecated` lint and reads like this:
+
+```text
+warning: use of deprecated constant `_::openapi_trait_warning`: openapi-trait: operation `listPets`: cookie parameter `session` is not supported and was skipped
+ --> src/lib.rs:1:23
+  |
+1 | #[openapi_trait::axum("openapi.yaml")]
+  |                       ^^^^^^^^^^^^^^
+```
+
+To silence them, put `#[allow(deprecated)]` (or `#[expect(deprecated)]`) on
+the module or crate that contains the annotated module. An attribute on the
+annotated module itself doesn't reach them.
+
 ## Schemas
 
 | Feature | Status |

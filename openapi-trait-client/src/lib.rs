@@ -11,7 +11,7 @@ mod codegen;
 mod reqwest_derive;
 
 use openapi_trait_shared::args::MacroArgs;
-use openapi_trait_shared::source_file::{module_contents, wrap_module};
+use openapi_trait_shared::source_file::{module_contents, warning_items, wrap_module};
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use syn::{parse_macro_input, DeriveInput, ItemMod};
@@ -52,7 +52,7 @@ use syn::{parse_macro_input, DeriveInput, ItemMod};
 /// (relative to `CARGO_MANIFEST_DIR`), which you should gitignore yourself.
 /// The file is rewritten only when its content changes. rust-analyzer may need
 /// a server restart after the file is first created. If writing fails, the
-/// macro warns on stderr and falls back to inline code.
+/// macro emits a compiler warning and falls back to inline code.
 ///
 /// # Debugging
 ///
@@ -122,7 +122,7 @@ fn run_macro(args: &MacroArgs, item: TokenStream, include_reqwest: bool) -> Toke
         }
     };
 
-    let body = codegen::generate_client(mod_ident, &openapi, include_reqwest);
+    let (body, mut warnings) = codegen::generate_client(mod_ident, &openapi, include_reqwest);
 
     let contents = module_contents(
         args.source_file.as_ref(),
@@ -130,8 +130,10 @@ fn run_macro(args: &MacroArgs, item: TokenStream, include_reqwest: bool) -> Toke
         mod_ident,
         &path_lit.value(),
         &body,
+        &mut warnings,
     );
-    let expanded = wrap_module(mod_vis, mod_ident, &spec_path_str, &contents);
+    let warnings = warning_items(&warnings, path_lit.span());
+    let expanded = wrap_module(mod_vis, mod_ident, &spec_path_str, &warnings, &contents);
 
     openapi_trait_shared::debug::write_debug_output(mod_ident, &expanded);
 

@@ -19,16 +19,18 @@ use openapi_trait_shared::codegen::{
 use self::{client_trait::generate_trait, reqwest_impl::generate_reqwest_impl};
 
 /// Generate schemas + operation types + transport-agnostic client trait.
+///
+/// Returns the module body and the warnings collected on the way, which the
+/// caller reports (see [`openapi_trait_shared::source_file::warning_items`]).
 pub fn generate_client(
     mod_ident: &syn::Ident,
     openapi: &OpenAPI,
     include_reqwest: bool,
-) -> TokenStream {
+) -> (TokenStream, Vec<String>) {
     let auth_schemes = collect_schemes(openapi);
     let mut ctx = CodegenCtx::new(openapi);
     let schema_types = generate_schemas(openapi, &mut ctx);
     let (ops, diagnostics) = collect_operations(openapi, &auth_schemes, &mut ctx);
-    diagnostics.emit_warnings();
     let op_errors = generate_operation_errors(&diagnostics.errors);
     let op_types = generate_operation_types(
         &ops,
@@ -57,7 +59,7 @@ pub fn generate_client(
 
     let root = root_module();
 
-    quote! {
+    let body = quote! {
         use super::*;
         #root
         #op_errors
@@ -67,5 +69,6 @@ pub fn generate_client(
         #op_types
         #client_trait
         #reqwest_impl
-    }
+    };
+    (body, diagnostics.warnings)
 }

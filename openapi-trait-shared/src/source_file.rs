@@ -9,7 +9,7 @@
 
 use std::path::{Path, PathBuf};
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 
 use crate::args::SourceFileOpt;
@@ -27,16 +27,23 @@ pub fn pretty(tokens: &TokenStream) -> String {
 
 /// Wrap the generated `inner` tokens in the annotated module, with the lint
 /// allowances and the spec-file rebuild trigger shared by every backend.
+///
+/// `warnings` (from [`warning_items`]) go next to the module rather than
+/// into it, so the module's `#[allow]`s don't apply to them and they keep
+/// their span when the body is `include!`d from a source file.
 #[must_use]
 pub fn wrap_module(
     vis: &syn::Visibility,
     ident: &syn::Ident,
     spec_path: &str,
+    warnings: &TokenStream,
     inner: &TokenStream,
 ) -> TokenStream {
     quote! {
         // Re-compile when the spec file changes.
         const _: &str = ::core::include_str!(#spec_path);
+
+        #warnings
 
         #[allow(
             missing_docs,
@@ -56,11 +63,38 @@ pub fn wrap_module(
     }
 }
 
+/// Turn codegen warnings into compiler warnings that point at `span` (the
+/// spec path literal).
+///
+/// Stable Rust has no API for a proc macro to emit a warning, and anything
+/// printed to stderr is mostly invisible: cargo hides it for dependencies,
+/// rust-analyzer never shows it, and a cached build doesn't run the macro.
+/// So each warning becomes a `#[deprecated]` constant that is used right
+/// away, with the use spanned at `span`. rustc then reports the warning as a
+/// `deprecated` lint, on every build that compiles the crate.
+#[must_use]
+pub fn warning_items(warnings: &[String], span: Span) -> TokenStream {
+    let items = warnings.iter().map(|warning| {
+        let note = format!("openapi-trait: {warning}");
+        let def = syn::Ident::new("openapi_trait_warning", Span::call_site());
+        let used = syn::Ident::new("openapi_trait_warning", span);
+        quote! {
+            const _: () = {
+                #[deprecated(note = #note)]
+                #[allow(non_upper_case_globals)]
+                const #def: () = ();
+                let _ = #used;
+            };
+        }
+    });
+    quote! { #(#items)* }
+}
+
 /// Produce the module contents: either the `body` itself, or (when
 /// `source_file` is requested and writing succeeds) an `include!` of a file
 /// holding the prettyprinted body.
 ///
-/// Write failures are reported on stderr and fall back to the inline body —
+/// A write failure is added to `warnings` and falls back to the inline body —
 /// like the debug dump, this convenience must never break a build.
 #[must_use]
 pub fn module_contents(
@@ -69,6 +103,7 @@ pub fn module_contents(
     mod_ident: &syn::Ident,
     spec_rel: &str,
     body: &TokenStream,
+    warnings: &mut Vec<String>,
 ) -> TokenStream {
     let Some(opt) = opt else {
         return body.clone();
@@ -79,9 +114,9 @@ pub fn module_contents(
             quote! { ::core::include!(#path); }
         }
         Err(error) => {
-            eprintln!(
-                "openapi-trait: cannot write generated source file, inlining instead: {error}"
-            );
+            warnings.push(format!(
+                "cannot write generated source file, inlining instead: {error}"
+            ));
             body.clone()
         }
     }
@@ -192,6 +227,30 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warning_items_use_one_deprecated_constant_per_warning() {
+        let tokens = warning_items(
+            &["first".to_owned(), "second \"quoted\"".to_owned()],
+            Span::call_site(),
+        )
+        .to_string();
+        assert_eq!(tokens.matches("deprecated").count(), 2, "{tokens}");
+        assert!(
+            tokens.contains(r#"note = "openapi-trait: first""#),
+            "{tokens}"
+        );
+        assert!(
+            tokens.contains(r#"note = "openapi-trait: second \"quoted\"""#),
+            "{tokens}"
+        );
+        assert!(tokens.contains("let _ = openapi_trait_warning"), "{tokens}");
+    }
+
+    #[test]
+    fn no_warnings_emit_nothing() {
+        assert!(warning_items(&[], Span::call_site()).is_empty());
+    }
 
     #[test]
     fn fnv_is_stable() {

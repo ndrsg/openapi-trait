@@ -339,13 +339,14 @@ pub enum ResponseStatus {
 /// Collected codegen diagnostics, separated by severity.
 ///
 /// Errors are turned into `compile_error!` tokens (the build fails); warnings
-/// are printed to stderr during macro expansion (the build proceeds). This
-/// keeps unsupported `OpenAPI` constructs from being dropped silently.
+/// become compiler warnings (the build proceeds, see
+/// [`crate::source_file::warning_items`]). This keeps unsupported `OpenAPI`
+/// constructs from being dropped silently.
 #[derive(Debug, Default)]
 pub struct Diagnostics {
     /// Fatal problems, emitted as `compile_error!` tokens.
     pub errors: Vec<String>,
-    /// Non-fatal skips, emitted as `eprintln!` warnings; the build proceeds.
+    /// Non-fatal skips, emitted as compiler warnings; the build proceeds.
     pub warnings: Vec<String>,
 }
 
@@ -358,13 +359,6 @@ impl Diagnostics {
     /// Record a non-fatal diagnostic.
     fn warn(&mut self, msg: String) {
         self.warnings.push(msg);
-    }
-
-    /// Print all collected warnings to stderr during macro expansion.
-    pub fn emit_warnings(&self) {
-        for warning in &self.warnings {
-            eprintln!("openapi-trait: warning: {warning}");
-        }
     }
 }
 
