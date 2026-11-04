@@ -90,8 +90,13 @@ fn generate_impl_bound(auth_state: &syn::Ident, has_auth: bool) -> TokenStream {
 fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
     quote! {
         #[derive(::core::fmt::Debug)]
+        #[non_exhaustive]
         pub enum #error_name {
             Transport(::openapi_trait::reqwest::Error),
+            Decode {
+                operation: &'static str,
+                source: ::openapi_trait::serde_json::Error,
+            },
             MissingCredential {
                 operation: &'static str,
                 scheme: &'static str,
@@ -112,6 +117,9 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
             fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
                     Self::Transport(error) => ::core::write!(formatter, "reqwest transport error: {error}"),
+                    Self::Decode { operation, source } => {
+                        ::core::write!(formatter, "cannot decode the response body of `{operation}`: {source}")
+                    }
                     Self::MissingCredential { operation, scheme } => {
                         ::core::write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
                     }
@@ -131,6 +139,7 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
             fn source(&self) -> ::core::option::Option<&(dyn ::std::error::Error + 'static)> {
                 match self {
                     Self::Transport(error) => ::core::option::Option::Some(error),
+                    Self::Decode { source, .. } => ::core::option::Option::Some(source),
                     Self::MissingCredential { .. }
                     | Self::InvalidResponseHeader { .. }
                     | Self::UnexpectedStatus { .. } => ::core::option::Option::None,
@@ -495,22 +504,20 @@ fn generate_response_match(
                         &variant_ident,
                     )
                 } else if response.rust_type.is_some() {
-                    match response.encoding.as_ref() {
-                        Some(BodyEncoding::Bytes { .. }) => {
-                            quote! {
-                                #code => {
-                                    ::core::result::Result::Ok(#resp_ident::#variant_ident(
-                                        ::openapi_trait::ByteStream::from_reqwest(response),
-                                    ))
-                                }
+                    if let Some(BodyEncoding::Bytes { .. }) = response.encoding.as_ref() {
+                        quote! {
+                            #code => {
+                                ::core::result::Result::Ok(#resp_ident::#variant_ident(
+                                    ::openapi_trait::ByteStream::from_reqwest(response),
+                                ))
                             }
                         }
-                        _ => {
-                            quote! {
-                                #code => {
-                                    let body = response.json().await.map_err(#error_name::Transport)?;
-                                    ::core::result::Result::Ok(#resp_ident::#variant_ident(body))
-                                }
+                    } else {
+                        let json_body = json_body_expr(error_name, operation_name);
+                        quote! {
+                            #code => {
+                                let body = #json_body;
+                                ::core::result::Result::Ok(#resp_ident::#variant_ident(body))
                             }
                         }
                     }
@@ -560,7 +567,7 @@ fn generate_default_response_arm(
         .iter()
         .map(|h| generate_response_header_read(h, error_name, &op.operation_id));
     let header_fields = default.headers.iter().map(|h| &h.field_ident);
-    let body_read = response_body_read(default, error_name);
+    let body_read = response_body_read(default, error_name, &op.operation_id);
     let body_field = default.rust_type.as_ref().map(|_| quote! { body, });
     quote! {
         _ => {
@@ -609,7 +616,7 @@ fn generate_payload_response_arm(
     };
 
     // Headers must be read before the body consumes the response.
-    let body_read = response_body_read(response, error_name);
+    let body_read = response_body_read(response, error_name, &op.operation_id);
 
     quote! {
         #code => {
@@ -628,15 +635,32 @@ fn generate_payload_response_arm(
 fn response_body_read(
     response: &openapi_trait_shared::codegen::operations::ResponseInfo,
     error_name: &proc_macro2::Ident,
+    operation_name: &str,
 ) -> TokenStream {
     match (&response.rust_type, &response.encoding) {
         (Some(_), Some(BodyEncoding::Bytes { .. })) => quote! {
             let body = ::openapi_trait::ByteStream::from_reqwest(response);
         },
-        (Some(_), _) => quote! {
-            let body = response.json().await.map_err(#error_name::Transport)?;
-        },
+        (Some(_), _) => {
+            let json_body = json_body_expr(error_name, operation_name);
+            quote! { let body = #json_body; }
+        }
         (None, _) => quote! {},
+    }
+}
+
+/// An expression that consumes `response` and parses its body as JSON into
+/// the type the context expects. A failure to read the body is a
+/// `Transport` error; a body that doesn't parse is a `Decode` error.
+fn json_body_expr(error_name: &proc_macro2::Ident, operation_name: &str) -> TokenStream {
+    quote! {
+        {
+            let bytes = response.bytes().await.map_err(#error_name::Transport)?;
+            ::openapi_trait::serde_json::from_slice(&bytes).map_err(|source| #error_name::Decode {
+                operation: #operation_name,
+                source,
+            })?
+        }
     }
 }
 

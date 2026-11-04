@@ -394,6 +394,39 @@ async fn per_request_cookie_joins_the_scheme_cookie() {
     }
 }
 
+/// A body that isn't valid JSON is a `Decode` error naming the operation,
+/// not a transport error.
+#[tokio::test]
+async fn invalid_json_body_is_a_decode_error() {
+    let app = axum::Router::new().route("/admin", axum::routing::get(|| async { "not json" }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let client = {
+        use sec_client::SecClientClientAuth as _;
+        DerivedClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base,
+            creds: sec_client::SecClientAuthState::default(),
+        }
+        .with_bearer_auth("xyz")
+    };
+    let error = client
+        .get_admin(sec_client::get_admin::Request {}, None)
+        .await
+        .unwrap_err();
+    match &error {
+        sec_client::ReqwestSecClientClientError::Decode { operation, .. } => {
+            assert_eq!(*operation, "getAdmin");
+        }
+        other => panic!("expected a decode error, got {other:?}"),
+    }
+    let source = std::error::Error::source(&error).expect("decode errors have a source");
+    assert!(source.is::<serde_json::Error>(), "{source:?}");
+    assert!(error.to_string().contains("`getAdmin`"), "{error}");
+}
+
 #[tokio::test]
 async fn client_missing_credential_errors_before_send() {
     let client = DerivedClient {

@@ -55,10 +55,16 @@ Then call operations through the trait:
 ```
 
 The generated implementation returns `Reqwest{Mod}ClientError`, an enum
-covering transport errors, missing credentials, malformed response headers,
-and status codes the spec doesn't declare (`UnexpectedStatus`, which includes
-the body). When the operation has a `default` response, an undeclared status
-isn't an error: it's decoded into `Response::Default { status, body, … }`.
+covering transport errors (`Transport`), response bodies that don't parse as
+the declared type (`Decode`, with the `serde_json` error as its source),
+missing credentials, malformed response headers, and status codes the spec
+doesn't declare (`UnexpectedStatus`, which includes the body). When the
+operation has a `default` response, an undeclared status isn't an error: it's
+decoded into `Response::Default { status, body, … }`.
+
+The enum is `#[non_exhaustive]`, so variants can be added without a breaking
+change. That only matters for crates that depend on the one containing the
+generated module: inside it, a `match` can still list every variant.
 
 ## Per-request headers and auth
 
