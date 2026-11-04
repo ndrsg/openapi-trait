@@ -44,11 +44,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     # Keep in sync with `rust-version` in Cargo.toml and `msrv` in clippy.toml.
-    - uses: dtolnay/rust-toolchain@1.87
+    - uses: dtolnay/rust-toolchain@1.89
     - uses: Swatinem/rust-cache@v2
-    # `+1.87` overrides the newer toolchain pinned in rust-toolchain.toml.
+    # `+1.89` overrides the newer toolchain pinned in rust-toolchain.toml.
     - name: Check
       run: |
-        cargo +1.87 check --workspace
-        cargo +1.87 check --workspace --features validation
-        cargo +1.87 check -p openapi-trait --no-default-features
+        cargo +1.89 check --workspace
+        cargo +1.89 check --workspace --features validation
+        cargo +1.89 check -p openapi-trait --no-default-features
