@@ -27,7 +27,7 @@ syn = { version = "3", features = ["full"] }
 oas3 = "0.22"
 serde = { version = "1", features = ["derive"] }
 heck = "0.5"
-openapi-trait-shared = { path = "../openapi-trait-shared", version = "1.1.0" }
+openapi-trait-shared = { path = "../openapi-trait-shared", version = "1.1.1" }
 
 [lints]
 workspace = true
