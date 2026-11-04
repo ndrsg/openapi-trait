@@ -302,7 +302,7 @@ pub struct Diagnostics {
 
 impl Diagnostics {
     /// Record a fatal diagnostic.
-    fn error(&mut self, msg: String) {
+    pub(crate) fn error(&mut self, msg: String) {
         self.errors.push(msg);
     }
 
@@ -452,7 +452,7 @@ fn build_operation_info(
         Some((params, body, responses))
     });
     let ((path_params, query_params, header_params), body, responses) = collected?;
-    let auth = resolve_op_security(operation, openapi, schemes);
+    let auth = resolve_op_security(operation, &operation_id, openapi, schemes, diag);
 
     Some(OperationInfo {
         operation_id,
@@ -1431,7 +1431,8 @@ mod tests {
     /// Parse a spec and collect its operations + diagnostics.
     fn collect(spec: &str) -> (Vec<OperationInfo>, Diagnostics) {
         let openapi = crate::spec::load_spec(spec).expect("spec parses");
-        collect_operations(&openapi, &[], &mut CodegenCtx::new(&openapi))
+        let schemes = crate::codegen::security::collect_schemes(&openapi);
+        collect_operations(&openapi, &schemes, &mut CodegenCtx::new(&openapi))
     }
 
     fn test_binary_types() -> BinaryBodyTypes {
@@ -1462,6 +1463,115 @@ paths:
         assert_eq!(diag.errors.len(), 1);
         assert!(diag.errors[0].contains("missing an `operationId`"));
         assert!(diag.errors[0].contains("get /pets"));
+    }
+
+    /// A spec with one operation guarded by `security: [{<requirement>}]` and
+    /// the given `components.securitySchemes` body.
+    fn secured_spec(version: &str, schemes: &str, requirement: &str) -> String {
+        format!(
+            r#"
+openapi: {version}
+info: {{ title: t, version: "1.0" }}
+paths:
+  /secret:
+    get:
+      operationId: getSecret
+      security: [{requirement}]
+      responses:
+        '200': {{ description: ok }}
+components:
+  securitySchemes:
+{schemes}
+"#
+        )
+    }
+
+    /// Assert that the spec yields exactly one error naming the operation, the
+    /// scheme and `reason`.
+    fn assert_scheme_error(spec: &str, scheme: &str, reason: &str) {
+        let (ops, diag) = collect(spec);
+        assert_eq!(diag.errors.len(), 1, "errors: {:?}", diag.errors);
+        let err = &diag.errors[0];
+        assert!(err.contains("operation `getSecret`"), "{err}");
+        assert!(err.contains(&format!("scheme `{scheme}`")), "{err}");
+        assert!(err.contains(reason), "{err}");
+        assert!(
+            ops.iter()
+                .all(|op| !op.auth.alternatives.iter().any(|a| a == scheme)),
+            "the unsupported scheme must not become an alternative"
+        );
+    }
+
+    #[test]
+    fn http_digest_requirement_is_a_fatal_error() {
+        assert_scheme_error(
+            &secured_spec(
+                "3.0.0",
+                "    digestAuth: { type: http, scheme: digest }",
+                "{ digestAuth: [] }",
+            ),
+            "digestAuth",
+            "`scheme: digest`",
+        );
+    }
+
+    #[test]
+    fn api_key_with_invalid_location_is_a_fatal_error() {
+        assert_scheme_error(
+            &secured_spec(
+                "3.0.0",
+                "    key: { type: apiKey, in: headers, name: X-Key }",
+                "{ key: [] }",
+            ),
+            "key",
+            "`in: headers`",
+        );
+    }
+
+    #[test]
+    fn mutual_tls_requirement_is_a_fatal_error() {
+        assert_scheme_error(
+            &secured_spec("3.1.0", "    mtls: { type: mutualTLS }", "{ mtls: [] }"),
+            "mtls",
+            "`mutualTLS`",
+        );
+    }
+
+    #[test]
+    fn undeclared_scheme_requirement_is_a_fatal_error() {
+        assert_scheme_error(
+            &secured_spec(
+                "3.0.0",
+                "    bearer: { type: http, scheme: bearer }",
+                "{ missing: [] }",
+            ),
+            "missing",
+            "not declared",
+        );
+    }
+
+    #[test]
+    fn unsupported_alternative_next_to_a_supported_one_is_a_fatal_error() {
+        assert_scheme_error(
+            &secured_spec(
+                "3.0.0",
+                "    bearer: { type: http, scheme: bearer }\n    digestAuth: { type: http, scheme: digest }",
+                "{ bearer: [] }, { digestAuth: [] }",
+            ),
+            "digestAuth",
+            "`scheme: digest`",
+        );
+    }
+
+    #[test]
+    fn unsupported_scheme_that_no_operation_requires_is_fine() {
+        let (ops, diag) = collect(&secured_spec(
+            "3.0.0",
+            "    bearer: { type: http, scheme: bearer }\n    digestAuth: { type: http, scheme: digest }",
+            "{ bearer: [] }",
+        ));
+        assert!(diag.errors.is_empty(), "errors: {:?}", diag.errors);
+        assert_eq!(ops[0].auth.alternatives, ["bearer"]);
     }
 
     #[test]

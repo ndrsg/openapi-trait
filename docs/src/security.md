@@ -22,6 +22,10 @@ These rules decide which operations require credentials:
   optional: the server passes `Option<…>` to the handler, with `None` for an
   anonymous request, instead of returning 401, and the client sends a
   credential if one is configured but doesn't fail without one.
+- An operation that requires an unsupported scheme (such as `http` with
+  `scheme: digest`, or `mutualTLS`) or a scheme that isn't declared in
+  `components.securitySchemes` is a compile error, so it is never generated
+  without auth. Unsupported schemes that no operation requires are ignored.
 
 ## Server side
 

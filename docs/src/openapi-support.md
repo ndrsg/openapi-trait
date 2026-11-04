@@ -49,6 +49,7 @@ to OpenAPI 3 first.
 | `http` bearer | ✅ |
 | `http` basic | ✅ |
 | `oauth2`, `openIdConnect` | ✅ handled like `http` bearer; scopes are not checked |
+| `http` with another scheme (`digest`, …), `mutualTLS`, `apiKey` with another `in`, `$ref` schemes | ❌ an operation that requires one fails to compile |
 
 See [Security](security.md) for details.
 

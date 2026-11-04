@@ -7,6 +7,10 @@
 //! - `oauth2` and `openIdConnect`, which carry an `Authorization: Bearer`
 //!   token and are handled like `http` bearer. Scopes are not checked.
 //!
+//! An operation that requires any other scheme (`http` digest, `mutualTLS`,
+//! an `apiKey` with an invalid `in`, a `$ref`) or an undeclared scheme is a
+//! `compile_error!`, so it is never generated without auth.
+//!
 //! Multi-scheme `AND`
 //! requirements (a single requirement object naming more than one scheme) emit
 //! a `compile_error!` because v0.1 only supports `OR` of single-scheme
@@ -58,52 +62,89 @@ pub struct OpSecurity {
 }
 
 /// Read `components.securitySchemes` and keep only schemes supported in v0.1.
+///
+/// Unsupported schemes are left out here. An operation that requires one is
+/// reported by [`resolve_op_security`].
 #[must_use]
 pub fn collect_schemes(openapi: &Spec) -> Vec<SchemeInfo> {
     let Some(components) = openapi.components.as_ref() else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    for (name, ref_or) in &components.security_schemes {
-        let scheme = match ref_or {
-            ObjectOrReference::Object(s) => s,
-            ObjectOrReference::Ref { .. } => continue,
-        };
-        let kind = match scheme {
-            SecurityScheme::ApiKey { location, name, .. } => {
-                let loc = match location.as_str() {
-                    "header" => ApiKeyIn::Header,
-                    "query" => ApiKeyIn::Query,
-                    "cookie" => ApiKeyIn::Cookie,
-                    _ => continue,
-                };
-                SchemeKind::ApiKey {
-                    key: name.clone(),
-                    location: loc,
+    components
+        .security_schemes
+        .iter()
+        .filter_map(|(name, scheme)| {
+            let kind = classify_scheme(scheme).ok()?;
+            Some(SchemeInfo {
+                name: name.clone(),
+                ident: super::idents::schema_type_ident(name),
+                snake: name.to_snake_case(),
+                kind,
+            })
+        })
+        .collect()
+}
+
+/// Map a declared scheme to a supported [`SchemeKind`], or explain why it is
+/// not supported.
+fn classify_scheme(scheme: &ObjectOrReference<SecurityScheme>) -> Result<SchemeKind, String> {
+    let scheme = match scheme {
+        ObjectOrReference::Object(s) => s,
+        ObjectOrReference::Ref { ref_path, .. } => {
+            return Err(format!(
+                "is a `$ref` (`{ref_path}`), which is not supported"
+            ));
+        }
+    };
+    match scheme {
+        SecurityScheme::ApiKey { location, name, .. } => {
+            let location = match location.as_str() {
+                "header" => ApiKeyIn::Header,
+                "query" => ApiKeyIn::Query,
+                "cookie" => ApiKeyIn::Cookie,
+                other => {
+                    return Err(format!(
+                        "is an `apiKey` with `in: {other}`; only `header`, `query` and `cookie` are valid"
+                    ));
                 }
-            }
-            SecurityScheme::Http { scheme, .. } => match scheme.to_ascii_lowercase().as_str() {
-                "bearer" => SchemeKind::HttpBearer,
-                "basic" => SchemeKind::HttpBasic,
-                _ => continue,
-            },
-            // Both send the access token as `Authorization: Bearer <token>`.
-            // Validating the token, including its scopes, is the handler's job.
-            SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIdConnect { .. } => {
-                SchemeKind::HttpBearer
-            }
-            SecurityScheme::MutualTls { .. } => continue,
-        };
-        let ident = super::idents::schema_type_ident(name);
-        let snake = name.to_snake_case();
-        out.push(SchemeInfo {
-            name: name.clone(),
-            ident,
-            snake,
-            kind,
-        });
+            };
+            Ok(SchemeKind::ApiKey {
+                key: name.clone(),
+                location,
+            })
+        }
+        SecurityScheme::Http { scheme, .. } => match scheme.to_ascii_lowercase().as_str() {
+            "bearer" => Ok(SchemeKind::HttpBearer),
+            "basic" => Ok(SchemeKind::HttpBasic),
+            _ => Err(format!(
+                "is an `http` scheme with `scheme: {scheme}`; only `bearer` and `basic` are supported"
+            )),
+        },
+        // Both send the access token as `Authorization: Bearer <token>`.
+        // Validating the token, including its scopes, is the handler's job.
+        SecurityScheme::OAuth2 { .. } | SecurityScheme::OpenIdConnect { .. } => {
+            Ok(SchemeKind::HttpBearer)
+        }
+        SecurityScheme::MutualTls { .. } => {
+            Err("is a `mutualTLS` scheme, which is not supported".to_owned())
+        }
     }
-    out
+}
+
+/// Explain why a requirement names a scheme missing from `schemes`.
+fn unusable_scheme_reason(openapi: &Spec, name: &str) -> String {
+    let declared = openapi
+        .components
+        .as_ref()
+        .and_then(|c| c.security_schemes.get(name));
+    declared.map_or_else(
+        || "is not declared in `components.securitySchemes`".to_owned(),
+        |scheme| {
+            classify_scheme(scheme)
+                .err()
+                .unwrap_or_else(|| "was not collected".to_owned())
+        },
+    )
 }
 
 /// Resolve the effective security requirements for an operation.
@@ -115,14 +156,20 @@ pub fn collect_schemes(openapi: &Spec) -> Vec<SchemeInfo> {
 ///   default). [`oas3`] can't tell this case from `security: []`, so the
 ///   loader marks operations that declare it (see
 ///   [`crate::spec::OPERATION_HAS_SECURITY`]).
-/// - unknown `apiKey` locations and `mutualTLS` schemes are skipped.
 ///
 /// Each requirement object must reference exactly one supported scheme name to
-/// be accepted; requirements naming unknown schemes are dropped, and multi-key
-/// requirements (AND) are flagged via `had_unsupported_and` and otherwise dropped.
-/// An empty requirement (`{}`) allows anonymous requests and sets `optional`.
-#[must_use]
-pub fn resolve_op_security(op: &Operation, openapi: &Spec, schemes: &[SchemeInfo]) -> OpSecurity {
+/// be accepted. A requirement naming a scheme that is unsupported or not
+/// declared is a fatal error in `diag`: dropping it could leave the operation
+/// without auth. Multi-key requirements (AND) are flagged via
+/// `had_unsupported_and` and otherwise dropped. An empty requirement (`{}`)
+/// allows anonymous requests and sets `optional`.
+pub(crate) fn resolve_op_security(
+    op: &Operation,
+    operation_id: &str,
+    openapi: &Spec,
+    schemes: &[SchemeInfo],
+    diag: &mut super::operations::Diagnostics,
+) -> OpSecurity {
     let requirements = if op
         .extensions
         .contains_key(crate::spec::OPERATION_HAS_SECURITY)
@@ -144,6 +191,11 @@ pub fn resolve_op_security(op: &Operation, openapi: &Spec, schemes: &[SchemeInfo
         };
         if scheme_by_name(schemes, name).is_some() {
             out.alternatives.push(name.clone());
+        } else {
+            diag.error(format!(
+                "operation `{operation_id}` requires security scheme `{name}`, which {}",
+                unusable_scheme_reason(openapi, name)
+            ));
         }
     }
     out
