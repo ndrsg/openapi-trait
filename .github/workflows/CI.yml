@@ -35,3 +35,20 @@ jobs:
       run: cargo test --verbose
     - name: Run tests (validation)
       run: cargo test --verbose --features validation
+
+  msrv:
+    name: Minimum supported Rust version
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    # Keep in sync with `rust-version` in Cargo.toml and `msrv` in clippy.toml.
+    - uses: dtolnay/rust-toolchain@1.87
+    - uses: Swatinem/rust-cache@v2
+    # `+1.87` overrides the newer toolchain pinned in rust-toolchain.toml.
+    - name: Check
+      run: |
+        cargo +1.87 check --workspace
+        cargo +1.87 check --workspace --features validation
+        cargo +1.87 check -p openapi-trait --no-default-features
