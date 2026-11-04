@@ -9,10 +9,8 @@
 mod codegen;
 
 use openapi_trait_shared::args::MacroArgs;
-use openapi_trait_shared::source_file::{module_contents, warning_items, wrap_module};
 use proc_macro::TokenStream;
-use proc_macro2::Span;
-use syn::{parse_macro_input, ItemMod};
+use syn::parse_macro_input;
 
 /// Generates typed Rust code from an `OpenAPI` specification file.
 ///
@@ -88,57 +86,5 @@ pub fn openapi_trait(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 /// Run the core macro logic with the resolved spec path literal.
 fn run_macro(args: &MacroArgs, item: TokenStream) -> TokenStream {
-    let path_lit = &args.spec;
-    let module = parse_macro_input!(item as ItemMod);
-    let mod_ident = &module.ident;
-    let mod_vis = &module.vis;
-
-    let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") else {
-        return syn::Error::new(
-            Span::call_site(),
-            "CARGO_MANIFEST_DIR is not set; cannot resolve spec path",
-        )
-        .to_compile_error()
-        .into();
-    };
-
-    let spec_path = std::path::PathBuf::from(&manifest_dir).join(path_lit.value());
-    let spec_path_str = spec_path.to_string_lossy().into_owned();
-
-    let content = match std::fs::read_to_string(&spec_path) {
-        Ok(c) => c,
-        Err(e) => {
-            let msg = format!("cannot read OpenAPI spec `{spec_path_str}`: {e}");
-            return syn::Error::new(path_lit.span(), msg)
-                .to_compile_error()
-                .into();
-        }
-    };
-
-    let openapi = match openapi_trait_shared::spec::load_spec(&content) {
-        Ok(o) => o,
-        Err(e) => {
-            let msg = format!("cannot parse OpenAPI spec `{spec_path_str}`: {e}");
-            return syn::Error::new(path_lit.span(), msg)
-                .to_compile_error()
-                .into();
-        }
-    };
-
-    let (body, mut warnings) = codegen::generate_axum(mod_ident, &openapi);
-
-    let contents = module_contents(
-        args.source_file.as_ref(),
-        "axum",
-        mod_ident,
-        &path_lit.value(),
-        &body,
-        &mut warnings,
-    );
-    let warnings = warning_items(&warnings, path_lit.span());
-    let expanded = wrap_module(mod_vis, mod_ident, &spec_path_str, &warnings, &contents);
-
-    openapi_trait_shared::debug::write_debug_output(mod_ident, &expanded);
-
-    expanded.into()
+    openapi_trait_shared::expand::expand(args, item.into(), "axum", codegen::generate_axum).into()
 }
