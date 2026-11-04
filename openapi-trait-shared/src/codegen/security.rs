@@ -64,7 +64,7 @@ pub struct OpSecurity {
 /// Read `components.securitySchemes` and keep only schemes supported in v0.1.
 ///
 /// Unsupported schemes are left out here. An operation that requires one is
-/// reported by [`resolve_op_security`].
+/// reported by `resolve_op_security`.
 #[must_use]
 pub fn collect_schemes(openapi: &Spec) -> Vec<SchemeInfo> {
     let Some(components) = openapi.components.as_ref() else {
