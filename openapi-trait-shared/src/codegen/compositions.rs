@@ -1,12 +1,26 @@
 //! Generators for `oneOf` / `allOf` / `anyOf` schema compositions.
 //!
-//! - `oneOf` → Rust enum. Tagged via `#[serde(tag = "...")]` when the schema
-//!   carries a `discriminator`; otherwise `#[serde(untagged)]`.
-//! - `anyOf` → Rust enum, always `#[serde(untagged)]` (`oneOf` semantics without
-//!   the exclusivity guarantee is rarely useful in typed Rust).
-//! - `allOf` → Rust struct that merges its branches: `$ref` branches become
-//!   `#[serde(flatten)]` fields; inline object branches inline their properties
-//!   directly.
+//! [`generate_composition`] picks the shape:
+//!
+//! - Only `oneOf` → Rust enum. Tagged via `#[serde(tag = "...")]` when the
+//!   schema carries a `discriminator`; otherwise `#[serde(untagged)]`.
+//! - Only `anyOf` → Rust enum, always `#[serde(untagged)]` (`oneOf` semantics
+//!   without the exclusivity guarantee is rarely useful in typed Rust).
+//! - Anything else (`allOf`, the schema's own `properties` next to a
+//!   composition, or several composition keywords) → Rust struct holding, in
+//!   this order:
+//!   1. the schema's own `properties`,
+//!   2. the `allOf` branches: `$ref` branches become `#[serde(flatten)]`
+//!      fields; inline object branches inline their properties directly,
+//!   3. a `#[serde(flatten)]` `one_of` / `any_of` field holding an enum of
+//!      the branches (`{Name}OneOf` / `{Name}AnyOf`),
+//!   4. a flattened catch-all map for `additionalProperties` (`allOf` only;
+//!      `oneOf` / `anyOf` next to `additionalProperties` is untyped, see
+//!      [`super::model::kind`]).
+//!
+//! A property that also appears in a branch is consumed by the struct field
+//! and doesn't reach the branch. The exception is a `oneOf` discriminator's
+//! tag property: the tagged enum needs it, so it isn't a struct field.
 //!
 //! A `{type: "null"}` branch adds no variant or field: it makes the
 //! composition nullable instead (see [`super::model::is_nullable`]).
@@ -20,65 +34,106 @@
 //! alongside the explicit `components/schemas` items so all generated types
 //! live at module scope.
 
-use oas3::spec::{Discriminator, Schema};
+use heck::{ToPascalCase, ToSnakeCase};
+use oas3::spec::{Discriminator, ObjectSchema, Schema};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
 use super::ctx::CodegenCtx;
 use super::model::{self, Kind, SchemaRef};
-use super::schemas::{doc_attr, model_derives, object_field_tokens};
+use super::schemas::{additional_properties_field, doc_attr, model_derives, object_field_tokens};
 use super::types::schema_to_rust_type_ctx;
 
-/// Generate a Rust enum type for a `oneOf` composition.
-///
-/// When a `discriminator` is present we emit an internally tagged enum
-/// (`#[serde(tag = "...")]`); otherwise an untagged enum.
+/// Generate the Rust type named `name` for a composition schema (one whose
+/// [`model::kind`] is `OneOf`, `AnyOf` or `AllOf`). See the module docs for
+/// the shapes.
 #[must_use]
-pub fn generate_one_of(
+pub fn generate_composition(
     name: &str,
-    variants: &[Schema],
-    discriminator: Option<&Discriminator>,
-    description: Option<&String>,
+    schema: &ObjectSchema,
     ctx: &mut CodegenCtx,
 ) -> TokenStream {
-    generate_enum(name, variants, discriminator, description, ctx)
+    let enum_only = schema.properties.is_empty()
+        && schema.all_of.is_empty()
+        && !model::allows_additional_properties(schema)
+        && schema.one_of.is_empty() != schema.any_of.is_empty();
+    if !enum_only {
+        return generate_struct(name, schema, ctx);
+    }
+    let description = schema.description.as_ref();
+    if schema.one_of.is_empty() {
+        generate_enum(name, &schema.any_of, None, description, ctx)
+    } else {
+        let discriminator = schema.discriminator.as_ref();
+        generate_enum(name, &schema.one_of, discriminator, description, ctx)
+    }
 }
 
-/// Generate a Rust enum type for an `anyOf` composition.
-///
-/// Always untagged — we treat `anyOf` like a non-discriminated `oneOf` because
-/// strict `anyOf` semantics (multiple branches may match) do not have a clean
-/// representation in typed Rust.
-#[must_use]
-pub fn generate_any_of(
-    name: &str,
-    variants: &[Schema],
-    description: Option<&String>,
-    ctx: &mut CodegenCtx,
-) -> TokenStream {
-    generate_enum(name, variants, None, description, ctx)
+/// Generate the struct for a composition that isn't a plain enum (see the
+/// module docs).
+fn generate_struct(name: &str, schema: &ObjectSchema, ctx: &mut CodegenCtx) -> TokenStream {
+    let ident = super::idents::schema_type_ident(name);
+    let doc = doc_attr(&schema.description);
+
+    // The tagged `oneOf` enum reads its tag itself, so the struct must not
+    // consume it.
+    let tag = schema
+        .discriminator
+        .as_ref()
+        .filter(|_| !schema.one_of.is_empty())
+        .map(|d| d.property_name.as_str());
+    let mut fields: Vec<TokenStream> = schema
+        .properties
+        .iter()
+        .filter(|(prop_name, _)| Some(prop_name.as_str()) != tag)
+        .map(|(prop_name, prop_ref)| {
+            let is_required = schema.required.iter().any(|r| r == prop_name);
+            object_field_tokens(prop_name, prop_ref, is_required, name, ctx)
+        })
+        .collect();
+    fields.extend(all_of_fields(name, &schema.all_of, ctx));
+    let discriminator = schema.discriminator.as_ref();
+    fields.extend(flattened_enum_field(
+        name,
+        "oneOf",
+        &schema.one_of,
+        discriminator,
+        ctx,
+    ));
+    fields.extend(flattened_enum_field(
+        name,
+        "anyOf",
+        &schema.any_of,
+        None,
+        ctx,
+    ));
+    // `kind` makes `oneOf` / `anyOf` next to `additionalProperties` untyped,
+    // so this is only reached for `allOf`, where every field before the map
+    // is a struct that consumes its own keys.
+    fields.extend(additional_properties_field(name, schema, ctx));
+
+    let derives = model_derives();
+    quote! {
+        #doc
+        #derives
+        pub struct #ident {
+            #(#fields)*
+        }
+    }
 }
 
-/// Generate a Rust struct type for an `allOf` composition.
+/// The struct fields that merge the `allOf` branches of the composition
+/// `name`.
 ///
 /// `$ref` branches become `#[serde(flatten)]` fields of the referenced type.
-/// Inline object branches contribute their properties directly. Any other inline
-/// branch falls back to `serde_json::Value` (we do not synthesize nested types
-/// here — those are handled by the enum path via [`schema_to_rust_type_ctx`]).
-#[must_use]
-pub fn generate_all_of(
-    name: &str,
-    variants: &[Schema],
-    description: Option<&String>,
-    ctx: &mut CodegenCtx,
-) -> TokenStream {
-    let ident = super::idents::schema_type_ident(name);
-    let doc = doc_attr(&description.cloned());
-
+/// Inline object branches contribute their properties directly. Any other
+/// inline branch becomes a flattened field of a synthesized type, or
+/// `serde_json::Value` (see [`schema_to_rust_type_ctx`]).
+fn all_of_fields(name: &str, branches: &[Schema], ctx: &mut CodegenCtx) -> Vec<TokenStream> {
     let mut fields: Vec<TokenStream> = Vec::new();
     let mut ref_field_counter = 0usize;
 
-    for branch in model::non_null_branches(variants) {
+    for branch in model::non_null_branches(branches) {
         match model::view(branch) {
             SchemaRef::Ref(reference) => {
                 ref_field_counter += 1;
@@ -116,18 +171,40 @@ pub fn generate_all_of(
             }
         }
     }
-
-    let derives = model_derives();
-    quote! {
-        #doc
-        #derives
-        pub struct #ident {
-            #(#fields)*
-        }
-    }
+    fields
 }
 
-/// Shared helper backing [`generate_one_of`] and [`generate_any_of`].
+/// The `#[serde(flatten)]` field (`one_of` / `any_of`) that holds an enum of
+/// the `keyword` branches of the composition `parent`, or `None` if there are
+/// no branches. The enum is synthesized as `{parent}OneOf` /
+/// `{parent}AnyOf`.
+fn flattened_enum_field(
+    parent: &str,
+    keyword: &str,
+    branches: &[Schema],
+    discriminator: Option<&Discriminator>,
+    ctx: &mut CodegenCtx,
+) -> Option<TokenStream> {
+    if branches.is_empty() {
+        return None;
+    }
+    let enum_name = ctx.reserve_type_name(&format!("{parent}{}", keyword.to_pascal_case()));
+    let parent_ident = super::idents::schema_type_ident(parent);
+    let description = format!("The `{keyword}` branches of `{parent_ident}`.");
+    let tokens = generate_enum(&enum_name, branches, discriminator, Some(&description), ctx);
+    ctx.inline_types.push(tokens);
+    let ty = ctx.local_type(&super::idents::schema_type_ident(&enum_name));
+    let field = format_ident!("{}", keyword.to_snake_case());
+    Some(quote! {
+        #[serde(flatten)]
+        pub #field: #ty,
+    })
+}
+
+/// Generate an enum with one variant per `oneOf` / `anyOf` branch.
+///
+/// When a `discriminator` is present we emit an internally tagged enum
+/// (`#[serde(tag = "...")]`); otherwise an untagged enum.
 fn generate_enum(
     name: &str,
     variants: &[Schema],

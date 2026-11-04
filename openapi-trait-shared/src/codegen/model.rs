@@ -81,9 +81,9 @@ pub fn item(schema: &Schema) -> Option<&ObjectSchema> {
 
 /// The schema that `obj` wraps to allow `null`: the other branch of a
 /// two-branch `oneOf` / `anyOf` whose second branch is `{type: "null"}`,
-/// when `obj` has no `type` of its own.
+/// when `obj` has no `type`, `allOf` or `properties` of its own.
 fn null_wrapped(obj: &ObjectSchema) -> Option<&Schema> {
-    if obj.schema_type.is_some() || !obj.all_of.is_empty() {
+    if obj.schema_type.is_some() || !obj.all_of.is_empty() || !obj.properties.is_empty() {
         return None;
     }
     let ((branches, []) | ([], branches)) = (obj.one_of.as_slice(), obj.any_of.as_slice()) else {
@@ -155,9 +155,16 @@ pub fn description(schema: &Schema) -> Option<&String> {
 /// What `obj` describes (see [`Kind`]).
 ///
 /// A composition keyword wins over `type`, and `"null"` in the `type` list
-/// is ignored (see [`is_nullable`]).
+/// is ignored (see [`is_nullable`]). The schema's own `properties` don't
+/// change its kind: the composition generators include them (see
+/// [`super::compositions::generate_composition`]). A `oneOf` / `anyOf` next to
+/// `additionalProperties` is [`Kind::Any`], because a catch-all map can't sit
+/// next to a flattened enum without duplicating the enum's keys.
 #[must_use]
 pub fn kind(obj: &ObjectSchema) -> Kind {
+    if (!obj.one_of.is_empty() || !obj.any_of.is_empty()) && allows_additional_properties(obj) {
+        return Kind::Any;
+    }
     if !obj.one_of.is_empty() {
         return Kind::OneOf;
     }
@@ -191,6 +198,15 @@ pub fn kind(obj: &ObjectSchema) -> Kind {
         [] if obj.schema_type.is_none() && obj.items.is_some() => Kind::Array,
         _ => Kind::Any,
     }
+}
+
+/// Whether `obj` has an `additionalProperties` that allows extra properties
+/// (anything but `false`).
+#[must_use]
+pub fn allows_additional_properties(obj: &ObjectSchema) -> bool {
+    obj.additional_properties
+        .as_ref()
+        .is_some_and(|ap| !matches!(ap, Schema::Boolean(oas3::spec::BooleanSchema(false))))
 }
 
 /// The values of a string enum: a string schema with an `enum` of strings

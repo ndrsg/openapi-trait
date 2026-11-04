@@ -97,31 +97,11 @@ fn schema_kind_to_type(
             synthesize_inline_string_enum(schema, parent_name, ctx)
         }
         Kind::Object => object_schema_to_type(schema, parent_name, ctx),
-        Kind::OneOf => synthesize_inline_composition(parent_name, ctx, |name, ctx| {
-            super::compositions::generate_one_of(
-                name,
-                &schema.one_of,
-                schema.discriminator.as_ref(),
-                schema.description.as_ref(),
-                ctx,
-            )
-        }),
-        Kind::AnyOf => synthesize_inline_composition(parent_name, ctx, |name, ctx| {
-            super::compositions::generate_any_of(
-                name,
-                &schema.any_of,
-                schema.description.as_ref(),
-                ctx,
-            )
-        }),
-        Kind::AllOf => synthesize_inline_composition(parent_name, ctx, |name, ctx| {
-            super::compositions::generate_all_of(
-                name,
-                &schema.all_of,
-                schema.description.as_ref(),
-                ctx,
-            )
-        }),
+        Kind::OneOf | Kind::AnyOf | Kind::AllOf => {
+            synthesize_inline_composition(parent_name, ctx, |name, ctx| {
+                super::compositions::generate_composition(name, schema, ctx)
+            })
+        }
         Kind::Any => {
             // Intentionally unsupported: emit untyped JSON.
             quote! { ::openapi_trait::serde_json::Value }

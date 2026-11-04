@@ -1,0 +1,105 @@
+# A schema's own `properties` next to `oneOf` / `allOf` / `anyOf` (C9).
+openapi: 3.0.3
+info: { title: composition properties, version: "1.0" }
+paths:
+  /owner:
+    get:
+      operationId: getOwner
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Owner' }
+components:
+  schemas:
+    Cat:
+      type: object
+      required: [meow]
+      properties: { meow: { type: string } }
+    Dog:
+      type: object
+      required: [bark]
+      properties: { bark: { type: string } }
+    Named:
+      type: object
+      required: [name]
+      properties: { name: { type: string } }
+    PetOneOf:
+      type: object
+      required: [id]
+      properties: { id: { type: integer } }
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    PetAnyOf:
+      type: object
+      required: [id]
+      properties: { id: { type: integer } }
+      anyOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    PetAllOf:
+      type: object
+      required: [id]
+      properties: { id: { type: integer } }
+      allOf:
+        - $ref: '#/components/schemas/Cat'
+    # The usual discriminator pattern: the tag is declared as a property too.
+    Animal:
+      type: object
+      required: [kind, id]
+      properties:
+        kind: { type: string }
+        id: { type: integer }
+      discriminator:
+        propertyName: kind
+        mapping:
+          cat: '#/components/schemas/Cat'
+          dog: '#/components/schemas/Dog'
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    # Several composition keywords in one schema.
+    NamedPet:
+      allOf:
+        - $ref: '#/components/schemas/Named'
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    # `allOf` with own properties and a catch-all for the rest.
+    Extensible:
+      type: object
+      required: [id]
+      properties: { id: { type: integer } }
+      allOf:
+        - $ref: '#/components/schemas/Named'
+      additionalProperties: { type: string }
+    # `oneOf` next to `additionalProperties` stays untyped.
+    Loose:
+      type: object
+      properties: { id: { type: integer } }
+      additionalProperties: true
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    # Own property that refers back to the schema: must be boxed.
+    Chain:
+      type: object
+      properties:
+        next: { $ref: '#/components/schemas/Chain' }
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+    Owner:
+      type: object
+      required: [pet]
+      properties:
+        # Inline: becomes `OwnerPet` with a `OwnerPetOneOf` enum.
+        pet:
+          type: object
+          required: [id]
+          properties: { id: { type: integer } }
+          oneOf:
+            - $ref: '#/components/schemas/Cat'
+            - $ref: '#/components/schemas/Dog'

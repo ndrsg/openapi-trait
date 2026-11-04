@@ -281,7 +281,8 @@ fn reachability(edges: &BTreeMap<&str, Vec<ByValueRef<'_>>>) -> BTreeMap<String,
 }
 
 /// Collect the component names that `schema` embeds by value: `$ref`s in
-/// object properties and in `allOf` / `oneOf` / `anyOf` branches, including
+/// object properties (also those of a composition schema) and in `allOf` /
+/// `oneOf` / `anyOf` branches, including
 /// those nested in inline schemas. References behind an array or a map are
 /// skipped, because `Vec` and `HashMap` already add indirection.
 fn by_value_refs<'a>(schema: &'a Schema, in_property: bool, out: &mut Vec<ByValueRef<'a>>) {
@@ -307,6 +308,9 @@ fn inline_by_value_refs<'a>(
             }
         }
         Kind::OneOf | Kind::AnyOf | Kind::AllOf => {
+            for prop in schema.properties.values() {
+                by_value_refs(prop, true, out);
+            }
             let branches = schema
                 .one_of
                 .iter()

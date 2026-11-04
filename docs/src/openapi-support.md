@@ -19,6 +19,8 @@ to OpenAPI 3 first.
 | `oneOf` | ✅ a tagged enum if a `discriminator` is present, otherwise `#[serde(untagged)]` |
 | `allOf` | ✅ one merged struct: `$ref` branches via `#[serde(flatten)]`, inline objects inlined |
 | `anyOf` | ✅ `#[serde(untagged)]` enum |
+| Own `properties` next to `oneOf` / `anyOf` / `allOf`, or several of these keywords in one schema | ✅ one struct: the own properties as fields, `allOf` branches merged as above, and a `#[serde(flatten)]` field `one_of` / `any_of` holding a `{Name}OneOf` / `{Name}AnyOf` enum. A `oneOf` discriminator's tag property stays with the enum. A property that also appears in a branch is only filled in the struct field |
+| `oneOf` / `anyOf` next to `additionalProperties` | falls back to `serde_json::Value` |
 | Inline objects, enums and compositions in properties | ✅ lifted to `{ParentStruct}{Property}` |
 | Inline request and response body schemas | ✅ `Body` and `Status{code}Body` in the operation's module |
 | Recursive schemas | ✅ the field that closes a cycle becomes `Box<T>` (`Option<Box<T>>` when optional); references inside arrays and maps aren't boxed |

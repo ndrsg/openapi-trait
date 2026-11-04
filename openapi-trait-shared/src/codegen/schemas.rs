@@ -3,7 +3,7 @@ use oas3::spec::{ObjectSchema, Schema, Spec};
 use proc_macro2::TokenStream;
 use quote::quote;
 
-use super::compositions::{generate_all_of, generate_any_of, generate_one_of};
+use super::compositions::generate_composition;
 use super::ctx::CodegenCtx;
 use super::model::{self, Kind, SchemaRef};
 use super::types::{additional_properties_value_type, ref_to_ident, schema_to_rust_type_ctx};
@@ -51,15 +51,7 @@ fn generate_schema_item_inner(name: &str, ref_or: &Schema, ctx: &mut CodegenCtx)
     }
 
     match model::kind(schema) {
-        Kind::OneOf => generate_one_of(
-            name,
-            &schema.one_of,
-            schema.discriminator.as_ref(),
-            schema.description.as_ref(),
-            ctx,
-        ),
-        Kind::AnyOf => generate_any_of(name, &schema.any_of, schema.description.as_ref(), ctx),
-        Kind::AllOf => generate_all_of(name, &schema.all_of, schema.description.as_ref(), ctx),
+        Kind::OneOf | Kind::AnyOf | Kind::AllOf => generate_composition(name, schema, ctx),
         Kind::Object => generate_object_struct(name, schema, ctx),
         _ => {
             // Array, integer, etc. at top level: emit a newtype alias.
@@ -139,18 +131,7 @@ pub fn generate_object_struct(name: &str, obj: &ObjectSchema, ctx: &mut CodegenC
         })
         .collect();
 
-    // When declared properties coexist with `additionalProperties`, collect the
-    // extra entries into a flattened `HashMap` catch-all field.
-    let additional_field = obj.additional_properties.as_ref().and_then(|ap| {
-        let synth_name = format!("{name}AdditionalProperties");
-        additional_properties_value_type(ap, Some(&synth_name), ctx).map(|value_ty| {
-            quote! {
-                #[serde(flatten)]
-                pub additional_properties:
-                    ::std::collections::HashMap<::std::string::String, #value_ty>,
-            }
-        })
-    });
+    let additional_field = additional_properties_field(name, obj, ctx);
 
     let derives = model_derives();
     quote! {
@@ -162,6 +143,28 @@ pub fn generate_object_struct(name: &str, obj: &ObjectSchema, ctx: &mut CodegenC
             #additional_field
         }
     }
+}
+
+/// The flattened `HashMap` catch-all field that collects the entries of
+/// `obj`'s `additionalProperties`, if it allows any.
+///
+/// serde hands a flattened map whatever the fields before it didn't consume,
+/// so this must be the struct's last field.
+pub(crate) fn additional_properties_field(
+    name: &str,
+    obj: &ObjectSchema,
+    ctx: &mut CodegenCtx,
+) -> Option<TokenStream> {
+    obj.additional_properties.as_ref().and_then(|ap| {
+        let synth_name = format!("{name}AdditionalProperties");
+        additional_properties_value_type(ap, Some(&synth_name), ctx).map(|value_ty| {
+            quote! {
+                #[serde(flatten)]
+                pub additional_properties:
+                    ::std::collections::HashMap<::std::string::String, #value_ty>,
+            }
+        })
+    })
 }
 
 /// Emit a single struct field for an object property. Shared between
