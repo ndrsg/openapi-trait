@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - uses: Swatinem/rust-cache@v2
     - name: Lint
       run: cargo fmt --check && cargo clippy
@@ -42,9 +42,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     # Keep in sync with `rust-version` in Cargo.toml and `msrv` in clippy.toml.
-    - uses: dtolnay/rust-toolchain@1.89
+    - uses: dtolnay/rust-toolchain@1.120
     - uses: Swatinem/rust-cache@v2
     # `+1.89` overrides the newer toolchain pinned in rust-toolchain.toml.
     - name: Check
