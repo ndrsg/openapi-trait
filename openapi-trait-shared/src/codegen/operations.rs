@@ -149,6 +149,55 @@ pub struct ParamInfo {
     pub enum_values: Vec<String>,
     /// Query serialization strategy (meaningful only for query params).
     pub query: QuerySerialization,
+    /// How one wire value (one element, for an array) is parsed.
+    pub wire: WireValue,
+}
+
+/// How the server parses one wire value of a query or header parameter (one
+/// element, for an array) into its Rust type.
+///
+/// Decided from the schema, so a value is never read as JSON when it should
+/// be text: `?s=%22hi%22` for a string parameter is `"hi"` with its quotes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WireValue {
+    /// A string, including enums, dates and uuids: the raw value is the
+    /// string's content, exactly as sent.
+    String,
+    /// A number or boolean: the raw value is parsed as bare JSON.
+    Scalar,
+    /// Anything else (objects, untyped values): parsed as bare JSON, falling
+    /// back to the raw value as a string.
+    Json,
+}
+
+impl WireValue {
+    /// Classify the value schema of a parameter, following `$ref`s. No
+    /// schema means a plain string.
+    #[must_use]
+    pub fn of(schema: Option<&Schema>, openapi: &Spec) -> Self {
+        let Some(mut schema) = schema else {
+            return Self::String;
+        };
+        // Bounded, so a `$ref` cycle can't loop forever.
+        for _ in 0..16 {
+            match model::view(schema) {
+                model::SchemaRef::Ref(reference) => {
+                    match model::resolve_schema_ref(openapi, reference) {
+                        Some(target) => schema = target,
+                        None => return Self::Json,
+                    }
+                }
+                model::SchemaRef::Item(obj) => {
+                    return match model::kind(obj) {
+                        Kind::String => Self::String,
+                        Kind::Integer | Kind::Number | Kind::Boolean => Self::Scalar,
+                        _ => Self::Json,
+                    };
+                }
+            }
+        }
+        Self::Json
+    }
 }
 
 impl ParamInfo {
@@ -542,6 +591,12 @@ fn collect_params(
             quote! { ::std::string::String }
         };
 
+        let value_schema = if array_item_type.is_some() {
+            param_item.and_then(|s| s.items.as_deref())
+        } else {
+            param.schema.as_ref()
+        };
+        let wire = WireValue::of(value_schema, openapi);
         let query = query_serialization(param, array_item_type);
 
         // deepObject and object-valued query params are not yet serialized
@@ -567,6 +622,7 @@ fn collect_params(
             enum_ident,
             enum_values,
             query,
+            wire,
         };
 
         match param.location {

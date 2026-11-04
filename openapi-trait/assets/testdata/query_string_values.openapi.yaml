@@ -1,0 +1,45 @@
+# String query and header values must arrive exactly as sent, even when they
+# look like JSON (S4).
+openapi: 3.0.3
+info: { title: query string values, version: "1.0" }
+paths:
+  /echo:
+    get:
+      operationId: echo
+      parameters:
+        - { name: s, in: query, required: true, schema: { type: string } }
+        - { name: opt, in: query, schema: { type: string } }
+        - name: tags
+          in: query
+          required: true
+          schema: { type: array, items: { type: string } }
+        - name: csv
+          in: query
+          required: true
+          explode: false
+          schema: { type: array, items: { type: string } }
+        - { name: X-Code, in: header, required: true, schema: { $ref: '#/components/schemas/Code' } }
+        - { name: n, in: query, required: true, schema: { $ref: '#/components/schemas/Count' } }
+        - { name: color, in: query, required: true, schema: { $ref: '#/components/schemas/Color' } }
+      responses:
+        '200':
+          description: the parsed parameters
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Echo' }
+components:
+  schemas:
+    Code: { type: string }
+    Count: { type: integer }
+    Color: { type: string, enum: [red, green] }
+    Echo:
+      type: object
+      required: [s, tags, csv, code, n, color]
+      properties:
+        s: { type: string }
+        opt: { type: string }
+        tags: { type: array, items: { type: string } }
+        csv: { type: array, items: { type: string } }
+        code: { $ref: '#/components/schemas/Code' }
+        n: { $ref: '#/components/schemas/Count' }
+        color: { $ref: '#/components/schemas/Color' }

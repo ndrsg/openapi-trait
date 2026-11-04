@@ -4,7 +4,7 @@ use quote::{format_ident, quote};
 
 use openapi_trait_shared::codegen::operations::{
     is_plain_string_type, BodyEncoding, HeaderValueKind, OperationInfo, ParamInfo,
-    ResponseHeaderInfo, ResponseStatus,
+    ResponseHeaderInfo, ResponseStatus, WireValue,
 };
 use openapi_trait_shared::codegen::security::{
     resolve_alternatives, ApiKeyIn, SchemeInfo, SchemeKind,
@@ -73,9 +73,9 @@ fn header_needs_de(p: &ParamInfo) -> bool {
 ///
 /// `__parse_query` decodes the raw query into `(name, value)` pairs;
 /// `__query_de` converts a single decoded string (a query value or a non-string
-/// header value) into a typed value, trying a bare JSON parse first
-/// (numbers/bools) and falling back to a JSON string (plain strings, enums,
-/// dates, uuids).
+/// header value) into a typed value, as a bare JSON value, a JSON string, or
+/// both in that order, which the call site picks from the parameter's
+/// [`WireValue`] (see [`query_de`]).
 fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> TokenStream {
     let needs_parse = ops.iter().any(|op| route_uses_query(op, schemes));
     let needs_de = ops
@@ -103,9 +103,18 @@ fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> Toke
 
     let de = if needs_de {
         quote! {
-            fn __query_de<T: ::openapi_trait::serde::de::DeserializeOwned>(raw: &str) -> ::core::option::Option<T> {
-                if let ::core::result::Result::Ok(value) = ::openapi_trait::serde_json::from_str::<T>(raw) {
-                    return ::core::option::Option::Some(value);
+            fn __query_de<T: ::openapi_trait::serde::de::DeserializeOwned>(
+                raw: &str,
+                bare: bool,
+                quoted: bool,
+            ) -> ::core::option::Option<T> {
+                if bare {
+                    if let ::core::result::Result::Ok(value) = ::openapi_trait::serde_json::from_str::<T>(raw) {
+                        return ::core::option::Option::Some(value);
+                    }
+                }
+                if !quoted {
+                    return ::core::option::Option::None;
                 }
                 let quoted = ::openapi_trait::serde_json::Value::String(raw.to_string()).to_string();
                 ::openapi_trait::serde_json::from_str::<T>(&quoted).ok()
@@ -119,6 +128,18 @@ fn generate_query_helpers(ops: &[OperationInfo], schemes: &[SchemeInfo]) -> Toke
         #parse
         #de
     }
+}
+
+/// A call of `__query_de` that parses `raw` (a `&str` expression) into `ty`
+/// as `wire` says. A string is only ever read as a JSON string, so a raw
+/// value like `"hi"` keeps its quotes.
+fn query_de(ty: &TokenStream, wire: WireValue, raw: &TokenStream) -> TokenStream {
+    let (bare, quoted) = match wire {
+        WireValue::String => (false, true),
+        WireValue::Scalar => (true, false),
+        WireValue::Json => (true, true),
+    };
+    quote! { __query_de::<#ty>(#raw, #bare, #quoted) }
 }
 
 /// Emit one-off helpers (basic-auth decode, cookie lookup) only when needed.
@@ -482,7 +503,8 @@ fn header_value_conversion(p: &ParamInfo) -> TokenStream {
         if is_plain_string_type(ty) {
             quote! { |s: &str| ::core::option::Option::Some(::std::string::String::from(s)) }
         } else {
-            quote! { |s: &str| __query_de::<#ty>(s) }
+            let de = query_de(ty, p.wire, &quote!(s));
+            quote! { |s: &str| #de }
         }
     };
     p.query.array_item_type.as_ref().map_or_else(
@@ -757,6 +779,8 @@ fn array_query_binding(param: &ParamInfo) -> TokenStream {
         .clone()
         .unwrap_or_else(|| quote! { ::openapi_trait::serde_json::Value });
     let bad_element = invalid_query_param(name);
+    let de_v = query_de(&item_ty, param.wire, &quote!(__v));
+    let de_part = query_de(&item_ty, param.wire, &quote!(__part));
 
     if param.query.explode {
         // One repeated key per element.
@@ -764,7 +788,7 @@ fn array_query_binding(param: &ParamInfo) -> TokenStream {
             let mut __acc: ::std::vec::Vec<#item_ty> = ::std::vec::Vec::new();
             for (__k, __v) in &__pairs {
                 if __k == #name {
-                    match __query_de::<#item_ty>(__v) {
+                    match #de_v {
                         ::core::option::Option::Some(__el) => __acc.push(__el),
                         ::core::option::Option::None => { #bad_element }
                     }
@@ -792,7 +816,7 @@ fn array_query_binding(param: &ParamInfo) -> TokenStream {
             let mut __acc: ::std::vec::Vec<#item_ty> = ::std::vec::Vec::new();
             if !__raw.is_empty() {
                 for __part in __raw.split(#delim) {
-                    match __query_de::<#item_ty>(__part) {
+                    match #de_part {
                         ::core::option::Option::Some(__el) => __acc.push(__el),
                         ::core::option::Option::None => { #bad_element }
                     }
@@ -826,11 +850,12 @@ fn scalar_query_binding(param: &ParamInfo) -> TokenStream {
     let ty = &param.rust_type;
     let found = last_query_value(name);
     let invalid = invalid_query_param(name);
+    let de = query_de(ty, param.wire, &quote!(__raw));
 
     if param.required {
         quote! {
             let #field_ident = match #found {
-                ::core::option::Option::Some(__raw) => match __query_de::<#ty>(__raw) {
+                ::core::option::Option::Some(__raw) => match #de {
                     ::core::option::Option::Some(__v) => __v,
                     ::core::option::Option::None => { #invalid }
                 },
@@ -843,7 +868,7 @@ fn scalar_query_binding(param: &ParamInfo) -> TokenStream {
     } else {
         quote! {
             let #field_ident = match #found {
-                ::core::option::Option::Some(__raw) => match __query_de::<#ty>(__raw) {
+                ::core::option::Option::Some(__raw) => match #de {
                     ::core::option::Option::Some(__v) => ::core::option::Option::Some(__v),
                     ::core::option::Option::None => { #invalid }
                 },
