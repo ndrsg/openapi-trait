@@ -156,7 +156,7 @@ fn generate_trait_method(op: &OperationInfo) -> TokenStream {
         fn #method_ident(
             &self,
             ctx: #ctx_ty,
-        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
+        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + ::core::marker::Send {
             let _ = ctx;
             async {
                 ::core::result::Result::Err(

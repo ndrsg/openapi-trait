@@ -111,15 +111,15 @@ fn generate_error_type(error_name: &syn::Ident) -> TokenStream {
         impl ::core::fmt::Display for #error_name {
             fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 match self {
-                    Self::Transport(error) => write!(formatter, "reqwest transport error: {error}"),
+                    Self::Transport(error) => ::core::write!(formatter, "reqwest transport error: {error}"),
                     Self::MissingCredential { operation, scheme } => {
-                        write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
+                        ::core::write!(formatter, "missing credentials for scheme `{scheme}` on `{operation}`")
                     }
-                    Self::InvalidResponseHeader { operation, header, reason } => write!(
+                    Self::InvalidResponseHeader { operation, header, reason } => ::core::write!(
                         formatter,
                         "invalid response header `{header}` on `{operation}`: {reason}"
                     ),
-                    Self::UnexpectedStatus { operation, status, body } => write!(
+                    Self::UnexpectedStatus { operation, status, body } => ::core::write!(
                         formatter,
                         "unexpected status {status} for `{operation}`: {body}"
                     ),
@@ -297,7 +297,7 @@ fn generate_impl_method(
             &self,
             req: #req_ident,
             options: ::core::option::Option<::openapi_trait::RequestOptions>,
-        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + Send {
+        ) -> impl ::std::future::Future<Output = ::core::result::Result<#resp_ident, Self::Error>> + ::core::marker::Send {
             let client = ::openapi_trait::ReqwestClientCore::reqwest_client(self).clone();
             let base_url = ::openapi_trait::ReqwestClientCore::base_url(self).to_owned();
             #auth_setup
@@ -307,7 +307,7 @@ fn generate_impl_method(
                 let mut path = ::std::string::String::from(#path);
                 #(#path_replacements)*
 
-                let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+                let url = ::std::format!("{}{}", base_url.trim_end_matches('/'), path);
                 let mut request = client.#http_method(url);
 
                 #query_builder
