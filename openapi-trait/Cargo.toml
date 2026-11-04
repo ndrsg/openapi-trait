@@ -31,7 +31,7 @@ uuid = { version = "1", default-features = false, features = ["serde"] }
 http = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_valid = { version = "2", optional = true }
+serde_valid = { version = "3", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
@@ -42,7 +42,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 axum = "0.8"
 # The `Validate` derive in generated code expands to `::serde_valid` paths, so
 # tests and examples need it as a direct dependency, like users do.
-serde_valid = "2"
+serde_valid = "3"
 
 [lints]
 workspace = true
