@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [1.1.1](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v1.1.0...openapi-trait-v1.1.1) - 2026-11-04
+
+### Other
+
+- Merge pull request #23 from ndrsg/dependabot/cargo/base64-0.23.1
+- *(deps)* bump base64 from 0.22.1 to 0.23.1
+- *(deps)* bump serde_valid from 2.0.3 to 3.2.0
+
 ## [1.1.0](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-v1.0.0...openapi-trait-v1.1.0) - 2026-11-04
 
 ### Added
