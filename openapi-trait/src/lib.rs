@@ -193,7 +193,11 @@ impl RequestOptions {
     #[cfg(feature = "reqwest-client")]
     pub fn apply(self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         for (name, value) in self.headers {
-            request = request.header(name.as_str(), value.as_str());
+            request = if name.eq_ignore_ascii_case("cookie") {
+                append_cookie(request, &value)
+            } else {
+                request.header(name.as_str(), value.as_str())
+            };
         }
         // Build the `Authorization` value ourselves and apply it with replace
         // (rather than append) semantics, so a per-request credential overrides
@@ -226,6 +230,38 @@ impl RequestOptions {
         }
         request
     }
+}
+
+/// Add the `name=value` pairs in `cookie` to the request's `Cookie` header.
+///
+/// HTTP/1.1 allows only one `Cookie` header, so when a security scheme
+/// already set one, the pairs are joined to it with `; ` instead of being sent
+/// as a second header. If the request can't be inspected (a streaming body,
+/// or a builder that already holds an error), the header is appended as is,
+/// so any error still surfaces when the request is sent.
+#[cfg(feature = "reqwest-client")]
+fn append_cookie(request: reqwest::RequestBuilder, cookie: &str) -> reqwest::RequestBuilder {
+    use reqwest::header::{HeaderValue, COOKIE};
+
+    let Some((client, Ok(mut built))) = request
+        .try_clone()
+        .map(reqwest::RequestBuilder::build_split)
+    else {
+        return request.header(COOKIE, cookie);
+    };
+    let headers = built.headers_mut();
+    let mut merged: Vec<u8> = Vec::new();
+    for existing in headers.get_all(COOKIE) {
+        merged.extend_from_slice(existing.as_bytes());
+        merged.extend_from_slice(b"; ");
+    }
+    merged.extend_from_slice(cookie.as_bytes());
+    let Ok(mut value) = HeaderValue::from_bytes(&merged) else {
+        return request.header(COOKIE, cookie);
+    };
+    value.set_sensitive(true);
+    headers.insert(COOKIE, value);
+    reqwest::RequestBuilder::from_parts(client, built)
 }
 
 /// Set `value` as the request's `Authorization` header, replacing any value an

@@ -336,6 +336,49 @@ async fn per_request_bearer_overrides_scheme_credential() {
     }
 }
 
+/// A cookie from `RequestOptions` must join the scheme's `Cookie` header:
+/// HTTP/1.1 allows only one.
+#[tokio::test]
+async fn per_request_cookie_joins_the_scheme_cookie() {
+    // Reports every `Cookie` header it receives, separated by `|`.
+    let app = axum::Router::new().route(
+        "/cookied",
+        axum::routing::get(|headers: axum::http::HeaderMap| async move {
+            let cookies: Vec<&str> = headers
+                .get_all(axum::http::header::COOKIE)
+                .iter()
+                .map(|v| v.to_str().unwrap())
+                .collect();
+            axum::Json(serde_json::json!({ "session": cookies.join("|") }))
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let client = {
+        use sec_client::SecClientClientAuth as _;
+        DerivedClient {
+            http: openapi_trait::reqwest::Client::new(),
+            endpoint: base,
+            creds: sec_client::SecClientAuthState::default(),
+        }
+        .with_session_cookie("abc")
+    };
+    let resp = client
+        .get_cookied(
+            sec_client::get_cookied::Request {},
+            Some(openapi_trait::RequestOptions::new().header("Cookie", "extra=1")),
+        )
+        .await
+        .unwrap();
+    match resp {
+        sec_client::get_cookied::Response::Status200(body) => {
+            assert_eq!(body.session, "session=abc; extra=1");
+        }
+    }
+}
+
 #[tokio::test]
 async fn client_missing_credential_errors_before_send() {
     let client = DerivedClient {
