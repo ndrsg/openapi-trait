@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog,
 and this project adheres to Semantic Versioning.
 
+## [1.0.0](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-client-v0.0.9...openapi-trait-client-v1.0.0) - 2026-11-04
+
+### Added
+
+- [**breaking**] report undecodable response bodies as a Decode error
+- [**breaking**] support OpenAPI 3.1 by switching the model to `oas3`
+- [**breaking**] type the `default` response and send its status
+- [**breaking**] type header parameters by their schema
+- re-export `serde` and `serde_json` for generated code
+- [**breaking**] pass handlers a single `Context` and drop axum state
+- [**breaking**] move operation types into a module per operation
+- [**breaking**] generate types for inline request and response body schemas
+- support go to definition
+
+### Fixed
+
+- use full paths for format!, write! and Send in generated code
+- [**breaking**] report codegen warnings as compiler warnings
+- let the client read required string response headers
+- give synthesized types a suffix when their name is taken
+- [**breaking**] support optional auth via an empty security requirement
+- type `+json` and charset JSON bodies, warn on dropped bodies
+
+### Other
+
+- release 1.0.0 through a release PR
+- share the macro expansion between backends
+- clone only the credentials an operation uses
+- thread a `CodegenCtx` through schema codegen
+
 ## [0.0.9](https://github.com/ndrsg/openapi-trait/compare/openapi-trait-client-v0.0.8...openapi-trait-client-v0.0.9) - 2026-08-12
 
 ### Added
