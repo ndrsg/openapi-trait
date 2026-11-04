@@ -8,6 +8,12 @@ updates:
       prefix: chore
       include: scope
     groups:
+      # prettyplease is built on a specific syn major version, so the two
+      # must be bumped together. Listed first so it takes precedence.
+      syn:
+        patterns:
+          - syn
+          - prettyplease
       cargo-minor-patch:
         update-types:
           - minor

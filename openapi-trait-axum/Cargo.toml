@@ -22,7 +22,7 @@ validation = ["openapi-trait-shared/validation"]
 [dependencies]
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 oas3 = "0.22"
 serde = { version = "1", features = ["derive"] }
 heck = "0.5"
