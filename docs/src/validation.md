@@ -7,14 +7,20 @@ attributes taken from the schema's constraints.
 ```toml
 [dependencies]
 openapi-trait = { version = "0.0.9", features = ["validation"] }
+serde_valid = "2"
 ```
 
 ```rust,ignore
 {{#include ../../openapi-trait/examples/validation.rs:validate}}
 ```
 
-`serde_valid` is re-exported as `openapi_trait::serde_valid`, so you don't need
-to depend on it yourself.
+Unlike `serde` and `serde_json`, `serde_valid` must be a direct dependency of
+your crate. Its `Validate` derive expands to paths that start with
+`::serde_valid`, and it has no option to point them elsewhere. Without the
+dependency, the build fails with "cannot find `serde_valid` in the list of
+imported crates". Use major version 2, the same as openapi-trait, so cargo
+resolves both to one copy. `openapi_trait::serde_valid` is then the same
+crate, so either path works for importing `Validate`.
 
 ## Constraint mapping
 

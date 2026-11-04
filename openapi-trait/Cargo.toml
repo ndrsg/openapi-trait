@@ -40,6 +40,8 @@ futures-util = "0.3"
 http-body-util = "0.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls", "stream"] }
 axum = "0.8"
+# The `Validate` derive in generated code expands to `::serde_valid` paths, so
+# tests and examples need it as a direct dependency, like users do.
 serde_valid = "2"
 
 [lints]

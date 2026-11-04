@@ -23,11 +23,14 @@ promise a stable API.
 
 Generated code refers to these through `openapi_trait::…`, so you don't have
 to add them yourself: `serde`, `serde_json`, `chrono`, `uuid`, and, with the
-matching feature, `reqwest` and `serde_valid`. Generated types carry
+matching feature, `reqwest`. Generated types carry
 `#[serde(crate = "::openapi_trait::serde")]`, so their derives work without a
 `serde` dependency.
 
-Servers still need `axum` as a dependency, so you pick its version.
+Servers still need `axum` as a dependency, so you pick its version. With the
+`validation` feature, you also need `serde_valid = "2"`: it is re-exported as
+`openapi_trait::serde_valid`, but its derive only works when the crate is a
+direct dependency (see [Validation](validation.md)).
 
 ## Minimum Rust version
 

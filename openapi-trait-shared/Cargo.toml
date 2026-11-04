@@ -29,8 +29,9 @@ indexmap = "2"
 [features]
 # When enabled, generated model types derive `serde_valid::Validate` and carry
 # `#[validate(...)]` attributes reflecting the OpenAPI schema constraints. The
-# facade crate provides the actual `serde_valid` dependency (re-exported for the
-# generated code); this flag only toggles what the codegen emits.
+# facade crate re-exports `serde_valid`, but the derive's expansion refers to
+# `::serde_valid` directly, so the user's crate must depend on it too; this
+# flag only toggles what the codegen emits.
 validation = []
 
 [lints]

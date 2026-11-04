@@ -50,10 +50,15 @@
 //! `#[validate(...)]` field attributes reflecting the schema's constraints
 //! (`minLength`, `minimum`, `pattern`, `minItems`, `uniqueItems`, …). Bring the
 //! `Validate` trait into scope (`serde_valid` is re-exported by this crate under
-//! the feature) and call `.validate()`:
+//! the feature) and call `.validate()`.
+//!
+//! `serde_valid` must also be a direct dependency, because its derive expands
+//! to `::serde_valid::…` paths. Use major version 2, so cargo resolves it to
+//! the same copy as the re-export:
 //!
 //! ```toml
 //! openapi-trait = { version = "0.0.9", features = ["validation"] }
+//! serde_valid = "2"
 //! ```
 //!
 //! ```ignore
@@ -277,6 +282,9 @@ pub use serde_json;
 ///
 /// Bring [`serde_valid::Validate`] into scope to call `model.validate()` on the
 /// generated structs and enums.
+///
+/// The derive still needs `serde_valid` as a direct dependency of your crate:
+/// it expands to `::serde_valid::…` paths, which this re-export can't serve.
 #[cfg(feature = "validation")]
 pub use serde_valid;
 
