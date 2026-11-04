@@ -16,6 +16,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
     - name: Lint
       run: cargo fmt --check && cargo clippy
     - name: Lint (validation)
@@ -24,6 +25,12 @@ jobs:
       run: cargo build --verbose
     - name: Build examples
       run: cargo build --examples --all-features
+    - name: Check without default features
+      run: cargo check -p openapi-trait --no-default-features
+    - name: Docs
+      env:
+        RUSTDOCFLAGS: -D warnings
+      run: cargo doc --workspace --no-deps && cargo doc --workspace --no-deps --features validation
     - name: Run tests
       run: cargo test --verbose
     - name: Run tests (validation)
