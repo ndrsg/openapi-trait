@@ -4,7 +4,7 @@
 
 ```toml
 [dependencies]
-openapi-trait = "0.0.9"
+openapi-trait = "1"
 
 # For servers:
 axum = "0.8"

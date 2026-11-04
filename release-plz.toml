@@ -1,0 +1,5 @@
+[workspace]
+# Publish only when a release PR (branch `release-plz-*`) is merged, not on
+# every push to `main`. A version set by hand on `main` then goes through the
+# release PR, with its changelog, instead of being published right away.
+release_always = false

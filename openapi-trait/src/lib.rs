@@ -57,7 +57,7 @@
 //! the same copy as the re-export:
 //!
 //! ```toml
-//! openapi-trait = { version = "0.0.9", features = ["validation"] }
+//! openapi-trait = { version = "1", features = ["validation"] }
 //! serde_valid = "2"
 //! ```
 //!

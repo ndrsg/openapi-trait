@@ -15,7 +15,7 @@ the code always matches the spec.
 
 ```toml
 [dependencies]
-openapi-trait = "0.0.9"
+openapi-trait = "1"
 ```
 
 ## Server

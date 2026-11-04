@@ -97,5 +97,5 @@ dependency:
 
 ```toml
 [dependencies]
-openapi-trait = { version = "0.0.9", default-features = false }
+openapi-trait = { version = "1", default-features = false }
 ```

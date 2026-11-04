@@ -6,7 +6,7 @@ attributes taken from the schema's constraints.
 
 ```toml
 [dependencies]
-openapi-trait = { version = "0.0.9", features = ["validation"] }
+openapi-trait = { version = "1", features = ["validation"] }
 serde_valid = "2"
 ```
 
