@@ -283,9 +283,17 @@ fn generate_impl_method(
         generate_response_match(op, error_name, &resp_ident, operation_name);
 
     let alts = resolve_alternatives(&op.auth, schemes);
+    // Clone only the credentials this operation can use, not the whole
+    // auth state.
     let auth_setup = if has_auth && !alts.is_empty() {
+        let clones = alts.iter().map(|scheme| {
+            let field = scheme_field_ident(scheme);
+            let local = credential_local(scheme);
+            quote! { let #local = __auth_state.#field.clone(); }
+        });
         quote! {
-            let auth_state = ::openapi_trait::ReqwestClientAuth::auth_state(self).clone();
+            let __auth_state = ::openapi_trait::ReqwestClientAuth::auth_state(self);
+            #(#clones)*
         }
     } else {
         quote! {}
@@ -393,16 +401,22 @@ fn generate_auth_inject(
     }
 }
 
+/// The local holding an operation's copy of `scheme`'s credential (an
+/// `Option`), set up before the request future starts.
+fn credential_local(scheme: &SchemeInfo) -> syn::Ident {
+    format_ident!("__auth_{}", scheme.snake)
+}
+
 /// Produce a boolean expression: attempts to inject a single scheme into `request`,
 /// returning whether the credential was set.
 fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
-    let field = scheme_field_ident(scheme);
+    let credential = credential_local(scheme);
     match &scheme.kind {
         SchemeKind::ApiKey {
             key,
             location: ApiKeyIn::Header,
         } => quote! {
-            match &auth_state.#field {
+            match &#credential {
                 ::core::option::Option::Some(v) => {
                     request = request.header(#key, v);
                     true
@@ -414,7 +428,7 @@ fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
             key,
             location: ApiKeyIn::Query,
         } => quote! {
-            match &auth_state.#field {
+            match &#credential {
                 ::core::option::Option::Some(v) => {
                     request = request.query(&[(#key, v.as_str())]);
                     true
@@ -426,7 +440,7 @@ fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
             key,
             location: ApiKeyIn::Cookie,
         } => quote! {
-            match &auth_state.#field {
+            match &#credential {
                 ::core::option::Option::Some(v) => {
                     request = request.header(
                         ::openapi_trait::reqwest::header::COOKIE,
@@ -438,7 +452,7 @@ fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
             }
         },
         SchemeKind::HttpBearer => quote! {
-            match &auth_state.#field {
+            match &#credential {
                 ::core::option::Option::Some(v) => {
                     request = request.bearer_auth(v);
                     true
@@ -447,7 +461,7 @@ fn inject_scheme_expr(scheme: &SchemeInfo) -> TokenStream {
             }
         },
         SchemeKind::HttpBasic => quote! {
-            match &auth_state.#field {
+            match &#credential {
                 ::core::option::Option::Some((u, p)) => {
                     request = request.basic_auth(u, ::core::option::Option::Some(p));
                     true
