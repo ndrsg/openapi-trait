@@ -397,7 +397,12 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
     let auth_query_keys = collect_auth_query_keys(op, schemes);
 
     let (path_extractor, path_fields) = build_path_extractor(&op.path, &op.path_params);
-    let (query_extractor, query_stmts, query_fields) = build_query_extractor(op, &auth_query_keys);
+    let QueryExtraction {
+        extractor: query_extractor,
+        auth_stmts: query_auth_stmts,
+        param_stmts: query_param_stmts,
+        inits: query_fields,
+    } = build_query_extractor(op, &auth_query_keys);
     let (body_extractor, body_field) = build_body_extractor(op);
 
     let (header_stmts, header_fields) = build_header_extractor(op);
@@ -429,8 +434,12 @@ fn generate_route(op: &OperationInfo, schemes: &[SchemeInfo]) -> TokenStream {
                 let __api = __api.clone();
                 async move {
                     use ::axum::response::IntoResponse as _;
-                    #(#query_stmts)*
+                    // Auth comes before parameter parsing, so a request
+                    // without credentials gets 401 even if its parameters
+                    // are malformed.
+                    #(#query_auth_stmts)*
                     #auth_extract
+                    #(#query_param_stmts)*
                     #(#header_stmts)*
                     let req = #req_ident { #(#req_fields)* };
                     let ctx = #ctx_ident::new(req, #auth_call_arg headers);
@@ -694,19 +703,27 @@ fn build_path_extractor(
     (Some(extractor), inits)
 }
 
+/// The query handling of an operation (see [`build_query_extractor`]).
+#[derive(Default)]
+struct QueryExtraction {
+    /// The `RawQuery` closure parameter, if the route reads the query.
+    extractor: Option<TokenStream>,
+    /// Statements that parse the raw query into `__pairs` and bind any
+    /// auth-query credentials. They can't fail, and must run before auth.
+    auth_stmts: Vec<TokenStream>,
+    /// Statements that bind each query param to a typed local, honoring its
+    /// `style`/`explode`. They return 400 on a bad value, so they run after
+    /// auth.
+    param_stmts: Vec<TokenStream>,
+    /// Request-field inits that move those locals into the request struct.
+    /// Auth fields are consumed by the auth extractor, so they aren't here.
+    inits: Vec<TokenStream>,
+}
+
 /// Build the query handling for an operation.
-///
-/// Returns `(extractor param, binding statements, request-field inits)`. The
-/// statements parse the raw query into typed locals (honoring each param's
-/// `style`/`explode`) and bind any auth-query credentials; the inits move those
-/// locals into the request struct via field shorthand. Auth fields are consumed
-/// by the auth extractor, so they are not part of the inits.
-fn build_query_extractor(
-    op: &OperationInfo,
-    auth_query_keys: &[&str],
-) -> (Option<TokenStream>, Vec<TokenStream>, Vec<TokenStream>) {
+fn build_query_extractor(op: &OperationInfo, auth_query_keys: &[&str]) -> QueryExtraction {
     if op.query_params.is_empty() && auth_query_keys.is_empty() {
-        return (None, vec![], vec![]);
+        return QueryExtraction::default();
     }
 
     let extractor = quote! {
@@ -716,7 +733,7 @@ fn build_query_extractor(
     let mut stmts: Vec<TokenStream> = vec![quote! {
         let __pairs = __parse_query(&__raw_query);
     }];
-    stmts.extend(op.query_params.iter().map(query_param_binding));
+    let param_stmts = op.query_params.iter().map(query_param_binding).collect();
 
     for key in auth_query_keys {
         let field_ident = format_ident!("__auth_query_{}", key.to_snake_case());
@@ -739,7 +756,12 @@ fn build_query_extractor(
         })
         .collect();
 
-    (Some(extractor), stmts, inits)
+    QueryExtraction {
+        extractor: Some(extractor),
+        auth_stmts: stmts,
+        param_stmts,
+        inits,
+    }
 }
 
 /// Emit the statement binding one query parameter to a typed local, parsing it

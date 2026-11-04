@@ -27,6 +27,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TokenPayload"
+  /admin/search:
+    get:
+      operationId: searchAdmin
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: limit, in: query, required: true, schema: { type: integer } }
+      responses:
+        "204":
+          description: ok
   /flex:
     get:
       operationId: getFlex

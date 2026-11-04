@@ -270,6 +270,21 @@ async fn optional_auth_allows_anonymous_requests() {
     assert_eq!(body["kind"], "basic:u");
 }
 
+/// Auth is checked before the query is parsed, so a request without
+/// credentials gets 401 even when its query is malformed.
+#[tokio::test]
+async fn auth_is_checked_before_the_query() {
+    let base = spawn_server().await;
+    let http = reqwest::Client::new();
+    let url = format!("{base}/admin/search?limit=not-a-number");
+
+    let anonymous = http.get(&url).send().await.unwrap();
+    assert_eq!(anonymous.status(), 401);
+
+    let authenticated = http.get(&url).bearer_auth("xyz").send().await.unwrap();
+    assert_eq!(authenticated.status(), 400);
+}
+
 // ---- Client side: credential injection ----
 
 #[derive(Clone, openapi_trait::ReqwestClient)]
