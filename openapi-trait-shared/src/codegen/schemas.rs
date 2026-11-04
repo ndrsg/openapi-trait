@@ -67,11 +67,20 @@ fn generate_schema_item_inner(name: &str, ref_or: &Schema, ctx: &mut CodegenCtx)
 }
 
 /// Generate a string enum type from a schema.
+///
+/// Besides the derives, the enum gets a `Display` impl that writes the wire
+/// value, like the enums generated for parameters.
 pub(crate) fn generate_string_enum(name: &str, schema: &ObjectSchema) -> TokenStream {
     let ident = super::idents::schema_type_ident(name);
     let doc = doc_attr(&schema.description);
     let values = model::string_enum_values(schema).unwrap_or_default();
-    let variants = super::idents::enum_variant_idents(&values)
+    let variant_idents = super::idents::enum_variant_idents(&values);
+    let display_arms = variant_idents
+        .iter()
+        .zip(&values)
+        .map(|(variant_ident, v)| quote! { Self::#variant_ident => #v, })
+        .collect::<Vec<_>>();
+    let variants = variant_idents
         .into_iter()
         .zip(&values)
         .map(|(variant_ident, v)| {
@@ -93,6 +102,14 @@ pub(crate) fn generate_string_enum(name: &str, schema: &ObjectSchema) -> TokenSt
 
         pub enum #ident {
             #(#variants,)*
+        }
+
+        impl ::core::fmt::Display for #ident {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                f.write_str(match self {
+                    #(#display_arms)*
+                })
+            }
         }
     }
 }

@@ -38,9 +38,9 @@ pub fn generate_reqwest_impl(
         #auth_trait_def
         #error_type_def
 
-        fn encode_path_param(value: &impl ::core::fmt::Display) -> ::std::string::String {
+        fn encode_path_param(value: &impl ::openapi_trait::serde::Serialize) -> ::std::string::String {
             ::openapi_trait::percent_encoding::utf8_percent_encode(
-                &value.to_string(),
+                &query_value(value),
                 ::openapi_trait::percent_encoding::NON_ALPHANUMERIC,
             )
             .to_string()

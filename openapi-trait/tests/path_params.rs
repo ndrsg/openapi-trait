@@ -1,6 +1,7 @@
 //! Regression tests for path parameters: they are bound in URL order,
-//! string-enum path params get a generated type, and an operation-level param
-//! overrides a path-level one with the same name and location.
+//! string-enum path params get a generated type (or the component's type for a
+//! `$ref`), an operation-level param overrides a path-level one with the same
+//! name and location, and the client writes values in their JSON string form.
 #![allow(missing_docs)]
 
 #[openapi_trait::axum("assets/testdata/path_params.openapi.yaml")]
@@ -63,6 +64,22 @@ impl pp_server::PpServerApi for Server {
         let id: i64 = req.id;
         Ok(pp_server::get_dup::Response::Status200(id * 2))
     }
+
+    async fn get_shape(
+        &self,
+        ctx: pp_server::get_shape::Context,
+    ) -> Result<pp_server::get_shape::Response, Self::Error> {
+        // `shape` is the component type, so it can be returned as the body.
+        let shape: pp_server::Shape = ctx.req.shape;
+        Ok(pp_server::get_shape::Response::Status200(shape))
+    }
+
+    async fn get_at(
+        &self,
+        ctx: pp_server::get_at::Context,
+    ) -> Result<pp_server::get_at::Response, Self::Error> {
+        Ok(pp_server::get_at::Response::Status200(ctx.req.when))
+    }
 }
 
 async fn spawn_server() -> String {
@@ -109,6 +126,23 @@ async fn enum_path_param_is_deserialized_by_wire_value() {
 #[test]
 fn enum_path_param_displays_its_wire_value() {
     assert_eq!(pp_server::get_thing::KindPath::XY.to_string(), "x-y");
+}
+
+#[test]
+fn component_enum_displays_its_wire_value() {
+    assert_eq!(
+        pp_server::Shape::RoundedSquare.to_string(),
+        "rounded-square"
+    );
+}
+
+#[tokio::test]
+async fn component_enum_path_param_is_deserialized_by_wire_value() {
+    let base = spawn_server().await;
+    let (status, body) = get(format!("{base}/shapes/rounded-square")).await;
+    assert_eq!((status, body.as_str()), (200, r#""rounded-square""#));
+    let (status, _) = get(format!("{base}/shapes/triangle")).await;
+    assert_eq!(status, 400);
 }
 
 #[tokio::test]
@@ -168,5 +202,66 @@ mod client {
             .await
             .unwrap();
         assert!(matches!(resp, pp_client::get_dup::Response::Status200(10)));
+    }
+
+    #[tokio::test]
+    async fn client_round_trips_component_enum_and_date_time_path_params() {
+        let client = Client {
+            http: ::reqwest::Client::new(),
+            base_url: spawn_server().await,
+        };
+
+        let resp = client
+            .get_shape(
+                pp_client::get_shape::Request {
+                    shape: pp_client::Shape::RoundedSquare,
+                },
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            resp,
+            pp_client::get_shape::Response::Status200(pp_client::Shape::RoundedSquare)
+        ));
+
+        let when = "2026-11-30T10:15:00Z"
+            .parse::<openapi_trait::chrono::DateTime<openapi_trait::chrono::Utc>>()
+            .unwrap();
+        let resp = client
+            .get_at(pp_client::get_at::Request { when }, None)
+            .await
+            .unwrap();
+        assert!(matches!(resp, pp_client::get_at::Response::Status200(at) if at == when));
+    }
+
+    /// A `date-time` path parameter is sent in its RFC 3339 (JSON) form, not
+    /// as chrono's `Display` output (`2026-11-30 10:15:00 UTC`), which only
+    /// a chrono-based server would accept.
+    #[tokio::test]
+    async fn client_sends_date_time_path_params_as_rfc3339() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let sink = seen.clone();
+        let app = axum::Router::new().fallback(move |uri: axum::http::Uri| {
+            let sink = sink.clone();
+            async move {
+                *sink.lock().unwrap() = uri.path().to_owned();
+                axum::Json("2026-11-30T10:15:00Z")
+            }
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let client = Client {
+            http: ::reqwest::Client::new(),
+            base_url,
+        };
+        let when = "2026-11-30T10:15:00Z".parse().unwrap();
+        client
+            .get_at(pp_client::get_at::Request { when }, None)
+            .await
+            .unwrap();
+        assert_eq!(*seen.lock().unwrap(), "/at/2026%2D11%2D30T10%3A15%3A00Z");
     }
 }

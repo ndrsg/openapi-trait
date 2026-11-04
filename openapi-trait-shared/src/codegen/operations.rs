@@ -549,16 +549,28 @@ fn collect_params(
             }
         };
 
-        // A string-enum param gets a dedicated enum type; cookie params are
+        // A `$ref` to a component string enum uses that component's type. An
+        // inline string enum gets a dedicated enum type; cookie params are
         // skipped.
+        let component_enum = param
+            .schema
+            .as_ref()
+            .and_then(|schema| match model::view(schema) {
+                model::SchemaRef::Ref(reference) => Some(reference),
+                model::SchemaRef::Item(_) => None,
+            })
+            .filter(|_| param_item.is_some_and(model::is_string_enum));
         let enum_suffix = match param.location {
             ParameterIn::Path => Some("Path"),
             ParameterIn::Query => Some("Query"),
             ParameterIn::Header => Some("Header"),
             ParameterIn::Cookie => None,
         };
+        let inline_enum_values = param_item
+            .and_then(model::string_enum_values)
+            .filter(|_| component_enum.is_none());
         let (is_enum, enum_ident, enum_values) = if let (Some(suffix), Some(vals)) =
-            (enum_suffix, param_item.and_then(model::string_enum_values))
+            (enum_suffix, inline_enum_values)
         {
             let name = ctx.reserve_type_name(&format!("{}{suffix}", param.name.to_pascal_case()));
             let ident = match idents::type_ident(&name, operation_id) {
@@ -577,6 +589,8 @@ fn collect_params(
 
         let rust_type = if is_enum {
             ctx.local_type(enum_ident.as_ref().unwrap())
+        } else if let Some(reference) = component_enum {
+            ctx.ref_type(reference)
         } else if let Some(item) = &array_item_type {
             quote! { ::std::vec::Vec<#item> }
         } else if let Some(schema) = &param_schema {

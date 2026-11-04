@@ -29,11 +29,12 @@ schema. The module holds:
 | `Auth` | the operation accepts more than one security scheme |
 | `Status{code}` payload struct (body plus headers) | the response declares headers |
 | `Body`, `Status{code}Body`, `DefaultBody` | the request or response body schema is inline |
-| `{Param}Path`, `{Param}Query`, `{Param}Header` enums | a path, query or header parameter (or the items of an array query or header parameter) is an inline enum |
+| `{Param}Path`, `{Param}Query`, `{Param}Header` enums | a path, query or header parameter (or the items of an array query or header parameter) is an inline enum. A parameter that `$ref`s a component enum uses the component's type instead |
 
 Schema types derive `Debug`, `Clone`, `PartialEq`, `Serialize` and
 `Deserialize`. String enums (component schemas and parameter enums) also
-derive `Copy`, `Eq` and `Hash`, so they can be used as map keys. Structs don't
+derive `Copy`, `Eq` and `Hash`, so they can be used as map keys, and implement
+`Display`, which writes the wire value (`"rounded-square"`). Structs don't
 derive `Eq`, because a field may be a float.
 
 ## Naming rules

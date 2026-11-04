@@ -52,3 +52,30 @@ paths:
           description: ok
           content:
             application/json: { schema: { type: integer } }
+  # A path parameter that refers to a component enum uses the component type.
+  /shapes/{shape}:
+    get:
+      operationId: getShape
+      parameters:
+        - { name: shape, in: path, required: true, schema: { $ref: '#/components/schemas/Shape' } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: { schema: { $ref: '#/components/schemas/Shape' } }
+  # A date-time path parameter must be sent in its RFC 3339 form.
+  /at/{when}:
+    get:
+      operationId: getAt
+      parameters:
+        - { name: when, in: path, required: true, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json: { schema: { type: string, format: date-time } }
+components:
+  schemas:
+    Shape:
+      type: string
+      enum: [circle, "rounded-square"]

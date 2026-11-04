@@ -21,10 +21,8 @@ impl m::MApi for EchoServer {
             csv: req.csv,
             code: req.x_code,
             n: req.n,
-            color: match req.color {
-                m::echo::ColorQuery::Red => m::Color::Red,
-                m::echo::ColorQuery::Green => m::Color::Green,
-            },
+            // A `$ref` to a component enum uses the component's type.
+            color: req.color,
         }))
     }
 }
